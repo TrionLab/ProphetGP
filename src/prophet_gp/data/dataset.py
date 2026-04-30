@@ -83,7 +83,10 @@ class ReactionDatasetService:
             resolved_row = [self.resolver.to_canonical_smiles(token) for token in tokens]
             resolved.append(resolved_row)
 
-        condition_cols = [c for c in df.columns if c not in {react_col, target_col}]
+        ignore = set(self.config.ignore_columns)
+        condition_cols = [
+            c for c in df.columns if c not in {react_col, target_col} and c not in ignore
+        ]
         inferred = {col: infer_condition_type(df[col]) for col in condition_cols}
         inferred.update(self.config.explicit_condition_types)
 

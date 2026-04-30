@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib
+import inspect
+import pkgutil
 from typing import Callable, Dict, Iterable, List
 
 import numpy as np
@@ -61,24 +64,74 @@ class GaucheFeaturizerRegistry:
     def _load_gauche_featurisers(self) -> Dict[str, Callable[[Iterable[str]], np.ndarray]]:
         registry: Dict[str, Callable[[Iterable[str]], np.ndarray]] = {}
         try:
-            import gauche  # noqa: F401
+            import gauche
             from gauche import representations as reps
         except Exception:
             return registry
 
+        def _build_wrapper(fn: Callable) -> Callable[[Iterable[str]], np.ndarray]:
+            def _wrapped(smiles_list: Iterable[str]) -> np.ndarray:
+                result = fn(list(smiles_list))
+                return self._to_float_matrix(result)
+
+            return _wrapped
+
+        # 1) representations 루트에 직접 노출된 함수
         for attr in dir(reps):
             if attr.startswith("_"):
                 continue
             candidate = getattr(reps, attr)
-            if not callable(candidate):
+            if inspect.isfunction(candidate):
+                registry[attr.lower()] = _build_wrapper(candidate)
+
+        # 2) representations 하위 모듈(fingerprints/strings/graphs 등) 함수까지 순회
+        for mod_info in pkgutil.walk_packages(gauche.__path__, prefix="gauche."):
+            if not mod_info.name.startswith("gauche.representations."):
+                continue
+            try:
+                module = importlib.import_module(mod_info.name)
+            except Exception:
                 continue
 
-            def _build_wrapper(fn: Callable) -> Callable[[Iterable[str]], np.ndarray]:
-                def _wrapped(smiles_list: Iterable[str]) -> np.ndarray:
-                    result = fn(list(smiles_list))
-                    return np.asarray(result, dtype=np.float32)
-
-                return _wrapped
-
-            registry[attr.lower()] = _build_wrapper(candidate)
+            for attr_name, candidate in inspect.getmembers(module, inspect.isfunction):
+                if attr_name.startswith("_"):
+                    continue
+                # 외부에서 import된 함수는 제외하고, 해당 모듈에서 정의된 함수만 등록
+                if getattr(candidate, "__module__", "") != module.__name__:
+                    continue
+                key = attr_name.lower()
+                if key in registry:
+                    continue
+                registry[key] = _build_wrapper(candidate)
         return registry
+
+    def _to_float_matrix(self, result) -> np.ndarray:
+        # 기본 경로: 숫자형으로 바로 변환 가능한 경우
+        try:
+            return np.asarray(result, dtype=np.float32)
+        except Exception:
+            pass
+
+        # gauche molecular_graphs는 networkx.Graph 리스트를 반환하므로,
+        # GP 입력으로 사용 가능한 고정 길이 통계 벡터로 변환한다.
+        if isinstance(result, list) and result and hasattr(result[0], "number_of_nodes"):
+            rows = []
+            for graph in result:
+                n_nodes = float(graph.number_of_nodes())
+                n_edges = float(graph.number_of_edges())
+                avg_degree = (2.0 * n_edges / n_nodes) if n_nodes > 0 else 0.0
+                density = (
+                    (2.0 * n_edges / (n_nodes * (n_nodes - 1.0))) if n_nodes > 1 else 0.0
+                )
+                atomic_nums = []
+                for _, attrs in graph.nodes(data=True):
+                    atomic_nums.append(float(attrs.get("atomic_num", 0.0)))
+                atomic_mean = float(np.mean(atomic_nums)) if atomic_nums else 0.0
+                atomic_std = float(np.std(atomic_nums)) if atomic_nums else 0.0
+                rows.append([n_nodes, n_edges, avg_degree, density, atomic_mean, atomic_std])
+            return np.asarray(rows, dtype=np.float32)
+
+        raise ValueError(
+            "Featuriser output could not be converted to numeric matrix. "
+            "Consider selecting a vector featuriser such as ecfp_fingerprints."
+        )

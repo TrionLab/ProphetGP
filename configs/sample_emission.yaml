@@ -1,0 +1,22 @@
+# sample_data.csv: Mol.1 + Temperature → Emission Peak 예시용
+data:
+  reactant_column: Mol.1
+  target_column: "Emission Peak"
+  reactant_delimiter: "|"
+  ignore_columns:
+    - FWHM
+    - PLQY
+  explicit_condition_types:
+    Temperature: continuous
+
+featurization:
+  featuriser: ecfp_fingerprints
+  combine_strategy: concat
+
+optimization:
+  objective: target
+  target_value: 495.0
+  n_restarts: 10
+  raw_samples: 128
+  target_search_size: 5000
+  n_candidates: 3

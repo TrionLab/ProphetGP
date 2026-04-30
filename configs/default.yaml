@@ -12,6 +12,8 @@ featurization:
 
 optimization:
   objective: maximize
+  target_value: null
   n_restarts: 10
   raw_samples: 128
+  target_search_size: 4096
   n_candidates: 5

@@ -29,6 +29,8 @@ class ProphetGPPipeline:
             objective=config.optimization.objective,
             n_restarts=config.optimization.n_restarts,
             raw_samples=config.optimization.raw_samples,
+            target_value=config.optimization.target_value,
+            target_search_size=config.optimization.target_search_size,
         )
 
     def prepare_features(self, prepared: PreparedDataset) -> TrainingArtifacts:

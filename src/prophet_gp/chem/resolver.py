@@ -6,6 +6,10 @@ from typing import Iterable, List
 
 import requests
 from rdkit import Chem
+from rdkit import RDLogger
+
+_RD_LOGGER = RDLogger.logger()
+_RD_LOGGER.setLevel(RDLogger.CRITICAL)
 
 CAS_PATTERN = re.compile(r"^\d{2,7}-\d{2}-\d$")
 

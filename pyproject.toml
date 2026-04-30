@@ -19,7 +19,7 @@ dependencies = [
   "PyYAML>=6.0",
   "pydantic>=2.6",
   "requests>=2.31",
-  "gauche>=0.3.0",
+  "gauche>=0.1.6",
   "rdkit>=2023.9.1",
 ]
 
