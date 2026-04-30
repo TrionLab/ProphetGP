@@ -2,6 +2,15 @@ data:
   reactant_column: reactants
   target_column: target
   reactant_delimiter: "|"
+  reactant_allowed_values: []
+  condition_ranges: {}
+  # 예:
+  # condition_ranges:
+  #   temperature:
+  #     min: 20
+  #     max: 120
+  #   catalyst:
+  #     allowed_values: ["A", "B"]
   explicit_condition_types: {}
   # 예: {"catalyst": "categorical", "temperature": "continuous"}
 

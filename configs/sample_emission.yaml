@@ -3,6 +3,15 @@ data:
   reactant_column: Mol.1
   target_column: "Emission Peak"
   reactant_delimiter: "|"
+  reactant_allowed_values:
+    - "1,5-Diaminonaphthalene"
+    - "1,8-Diaminonaphthalene"
+    - "2,3-Diaminonaphthalene"
+    - "2,6-Diaminonaphthalene"
+  condition_ranges:
+    Temperature:
+      min: 0
+      max: 600
   ignore_columns:
     - FWHM
     - PLQY

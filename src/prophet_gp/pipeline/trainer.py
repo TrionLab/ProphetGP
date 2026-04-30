@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 from prophet_gp.config import AppConfig
 from prophet_gp.data.dataset import PreparedDataset, ReactionDatasetService
@@ -102,8 +103,76 @@ class ProphetGPPipeline:
             n_candidates=n_candidates,
             strategy=chosen_strategy,
         )
+        raw_candidates = self._apply_input_constraints(raw_candidates, artifacts)
         decoded = self._decode_candidates(raw_candidates, artifacts)
         return SuggestionResult(raw_candidates=raw_candidates, decoded_candidates=decoded)
+
+    def _apply_input_constraints(
+        self, raw_candidates: np.ndarray, artifacts: TrainingArtifacts
+    ) -> np.ndarray:
+        adjusted = np.array(raw_candidates, copy=True)
+        self._apply_reactant_constraints(adjusted, artifacts)
+        self._apply_condition_constraints(adjusted, artifacts)
+        return adjusted
+
+    def _apply_reactant_constraints(self, candidates: np.ndarray, artifacts: TrainingArtifacts) -> None:
+        allowed = self.config.data.reactant_allowed_values
+        if not allowed:
+            return
+        allowed_vectors = []
+        for raw in allowed:
+            tokens = [x.strip() for x in raw.split(self.config.data.reactant_delimiter) if x.strip()]
+            if not tokens:
+                continue
+            smiles_list = [self.dataset_service.resolver.to_canonical_smiles(tok) for tok in tokens]
+            per_molecule = self.featurizers.featurize(
+                smiles_list, name=self.config.featurization.featuriser
+            )
+            allowed_vectors.append(per_molecule.mean(axis=0))
+        if not allowed_vectors:
+            return
+        allowed_matrix = np.vstack(allowed_vectors)
+        for i in range(candidates.shape[0]):
+            cand_mol = candidates[i, : artifacts.mol_feature_dim]
+            distances = np.linalg.norm(allowed_matrix - cand_mol, axis=1)
+            nearest_idx = int(np.argmin(distances))
+            candidates[i, : artifacts.mol_feature_dim] = allowed_matrix[nearest_idx]
+
+    def _apply_condition_constraints(self, candidates: np.ndarray, artifacts: TrainingArtifacts) -> None:
+        if artifacts.condition_transformer is None or not artifacts.condition_columns:
+            return
+        ranges = self.config.data.condition_ranges
+        if not ranges:
+            return
+        transformer = artifacts.condition_transformer
+        numeric_cols = [c for c in artifacts.condition_columns if artifacts.condition_types.get(c) != "categorical"]
+        if not numeric_cols or "numeric" not in transformer.named_transformers_:
+            return
+        num_pipe = transformer.named_transformers_["numeric"]
+        if not isinstance(num_pipe, Pipeline):
+            return
+        scaler = num_pipe.named_steps.get("scaler")
+        if scaler is None:
+            return
+
+        categorical_width = 0
+        categorical_cols = [c for c in artifacts.condition_columns if artifacts.condition_types.get(c) == "categorical"]
+        if categorical_cols and "categorical" in transformer.named_transformers_:
+            cat_pipe = transformer.named_transformers_["categorical"]
+            ohe = cat_pipe.named_steps["ohe"]
+            categorical_width = len(ohe.get_feature_names_out(categorical_cols))
+
+        for n_idx, col in enumerate(numeric_cols):
+            cfg = ranges.get(col)
+            if cfg is None:
+                continue
+            feat_idx = artifacts.mol_feature_dim + categorical_width + n_idx
+            if cfg.min is not None:
+                min_scaled = (float(cfg.min) - float(scaler.mean_[n_idx])) / float(scaler.scale_[n_idx])
+                candidates[:, feat_idx] = np.maximum(candidates[:, feat_idx], min_scaled)
+            if cfg.max is not None:
+                max_scaled = (float(cfg.max) - float(scaler.mean_[n_idx])) / float(scaler.scale_[n_idx])
+                candidates[:, feat_idx] = np.minimum(candidates[:, feat_idx], max_scaled)
 
     def _decode_candidates(
         self, raw_candidates: np.ndarray, artifacts: TrainingArtifacts
@@ -130,6 +199,8 @@ class ProphetGPPipeline:
                 "nearest_known_reactants_smiles": artifacts.reactant_smiles[nearest_idx],
                 "nearest_reactant_distance": float(distances[nearest_idx]),
             }
+            if self.config.data.reactant_allowed_values:
+                row["reactant_candidates_scope"] = self.config.data.reactant_allowed_values
 
             if artifacts.condition_columns:
                 cand_cond = candidate[artifacts.mol_feature_dim :].reshape(1, -1)

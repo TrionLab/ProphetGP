@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field
 
 ConditionType = Literal["categorical", "continuous", "discrete"]
+
+
+class InputRangeConfig(BaseModel):
+    min: Optional[float] = None
+    max: Optional[float] = None
+    allowed_values: Optional[List[Union[str, float, int]]] = None
 
 
 class DataConfig(BaseModel):
@@ -16,6 +22,14 @@ class DataConfig(BaseModel):
     ignore_columns: List[str] = Field(
         default_factory=list,
         description="파일에 있어도 조건 피처에서 제외할 컬럼(보조 측정값 등).",
+    )
+    reactant_allowed_values: List[str] = Field(
+        default_factory=list,
+        description="추천 시 허용할 반응물 입력값 목록. 비어 있으면 열린 범위로 동작.",
+    )
+    condition_ranges: Dict[str, InputRangeConfig] = Field(
+        default_factory=dict,
+        description="조건 컬럼별 입력 범위/허용값 제약.",
     )
     explicit_condition_types: Dict[str, ConditionType] = Field(default_factory=dict)
 
