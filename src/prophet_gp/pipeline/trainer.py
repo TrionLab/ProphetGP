@@ -342,11 +342,14 @@ class ProphetGPPipeline:
             return restored
 
     def _build_target_objective_map(self, artifacts: TrainingArtifacts) -> Dict[str, Dict[str, Any]]:
-        explicit = self.config.optimization.target_objectives
+        explicit_target_objectives = self.config.optimization.target_objectives
         objective_map: Dict[str, Dict[str, Any]] = {}
         for t in artifacts.target_columns:
-            if t in explicit:
-                obj = explicit[t]
+            # 우선순위:
+            # 1) target_objectives.<target_name> 개별 설정
+            # 2) optimization 전역 설정(objective/target_value)
+            if t in explicit_target_objectives:
+                obj = explicit_target_objectives[t]
                 objective_map[t] = {
                     "objective": obj.objective,
                     "target_value": obj.target_value,

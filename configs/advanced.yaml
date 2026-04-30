@@ -6,10 +6,15 @@ data:
     - "FWHM"
   reactant_delimiter: "|"
   reactant_allowed_values:
+    - "1,2-Diaminonaphthalene"
+    - "1,3-Diaminonaphthalene"
     - "1,5-Diaminonaphthalene"
+    - "1,6-Diaminonaphthalene"
+    - "1,7-Diaminonaphthalene"
     - "1,8-Diaminonaphthalene"
     - "2,3-Diaminonaphthalene"
     - "2,6-Diaminonaphthalene"
+    - "2,7-Diaminonaphthalene"
   condition_ranges:
     Temperature:
       min: 0

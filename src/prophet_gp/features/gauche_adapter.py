@@ -7,7 +7,7 @@ from typing import Callable, Dict, Iterable, List
 
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors
+from rdkit.Chem import AllChem, DataStructs, Descriptors
 
 
 def _ecfp_featuriser(smiles_list: Iterable[str], n_bits: int = 2048, radius: int = 2) -> np.ndarray:
@@ -18,6 +18,31 @@ def _ecfp_featuriser(smiles_list: Iterable[str], n_bits: int = 2048, radius: int
             raise ValueError(f"Invalid SMILES for ECFP featurisation: {smi}")
         fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
         rows.append(np.array(fp, dtype=np.float32))
+    return np.vstack(rows)
+
+
+def _morgan_fp_featuriser(
+    smiles_list: Iterable[str], radius: int = 2, n_bits: int = 2048
+) -> np.ndarray:
+    """Morgan (ECFP-style) binary fingerprint with chirality flags.
+
+    gauche 패키지에 동명 함수가 없을 때 사용하는 내장 구현이다.
+    RDKit `GetMorganFingerprintAsBitVect(..., useChirality=True)`와 동일한 설정이다.
+    """
+    rows = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES for Morgan fingerprint featurisation: {smi}")
+        fp = AllChem.GetMorganFingerprintAsBitVect(
+            mol,
+            radius,
+            nBits=n_bits,
+            useChirality=True,
+        )
+        arr = np.zeros((n_bits,), dtype=np.float32)
+        DataStructs.ConvertToNumpyArray(fp, arr)
+        rows.append(arr)
     return np.vstack(rows)
 
 
@@ -44,6 +69,7 @@ class GaucheFeaturizerRegistry:
     def __init__(self):
         self._fallback: Dict[str, Callable[[Iterable[str]], np.ndarray]] = {
             "ecfp_fingerprints": _ecfp_featuriser,
+            "morgan_fp": _morgan_fp_featuriser,
             "rdkit_descriptors": _rdkit_desc_featuriser,
         }
         self._gauche_dynamic: Dict[str, Callable[[Iterable[str]], np.ndarray]] = self._load_gauche_featurisers()

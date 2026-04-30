@@ -21,8 +21,6 @@ class BayesianOptimizer:
     ):
         if objective not in {"maximize", "minimize", "target"}:
             raise ValueError("objective must be 'maximize', 'minimize', or 'target'")
-        if objective == "target" and target_value is None:
-            raise ValueError("target_value must be set when objective='target'")
         self.objective = objective
         self.target_value = target_value
         self.n_restarts = n_restarts
