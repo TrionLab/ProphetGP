@@ -26,6 +26,9 @@ class TrainingArtifacts:
     condition_columns: List[str]
     condition_types: Dict[str, str]
     condition_transformer: Optional[ColumnTransformer]
+    allowed_reactant_vectors: Optional[np.ndarray] = None
+    allowed_reactant_inputs: Optional[List[str]] = None
+    allowed_reactant_smiles: Optional[List[List[str]]] = None
 
 
 @dataclass
@@ -124,6 +127,8 @@ class ProphetGPPipeline:
         if not allowed:
             return
         allowed_vectors = []
+        allowed_inputs: List[str] = []
+        allowed_smiles_list: List[List[str]] = []
         for raw in allowed:
             tokens = [x.strip() for x in raw.split(self.config.data.reactant_delimiter) if x.strip()]
             if not tokens:
@@ -133,9 +138,14 @@ class ProphetGPPipeline:
                 smiles_list, name=self.config.featurization.featuriser
             )
             allowed_vectors.append(per_molecule.mean(axis=0))
+            allowed_inputs.append(raw)
+            allowed_smiles_list.append(smiles_list)
         if not allowed_vectors:
             return
         allowed_matrix = np.vstack(allowed_vectors)
+        artifacts.allowed_reactant_vectors = allowed_matrix
+        artifacts.allowed_reactant_inputs = allowed_inputs
+        artifacts.allowed_reactant_smiles = allowed_smiles_list
         for i in range(candidates.shape[0]):
             cand_mol = candidates[i, : artifacts.mol_feature_dim]
             distances = np.linalg.norm(allowed_matrix - cand_mol, axis=1)
@@ -149,24 +159,44 @@ class ProphetGPPipeline:
         if not ranges:
             return
         transformer = artifacts.condition_transformer
-        numeric_cols = [c for c in artifacts.condition_columns if artifacts.condition_types.get(c) != "categorical"]
+        categorical_cols = [c for c in artifacts.condition_columns if artifacts.condition_types.get(c) == "categorical"]
+        numeric_cols = [c for c in artifacts.condition_columns if c not in categorical_cols]
         if not numeric_cols or "numeric" not in transformer.named_transformers_:
-            return
+            pass
         num_pipe = transformer.named_transformers_["numeric"]
-        if not isinstance(num_pipe, Pipeline):
-            return
-        scaler = num_pipe.named_steps.get("scaler")
-        if scaler is None:
-            return
+        scaler = None
+        if isinstance(num_pipe, Pipeline):
+            scaler = num_pipe.named_steps.get("scaler")
 
         categorical_width = 0
-        categorical_cols = [c for c in artifacts.condition_columns if artifacts.condition_types.get(c) == "categorical"]
         if categorical_cols and "categorical" in transformer.named_transformers_:
             cat_pipe = transformer.named_transformers_["categorical"]
             ohe = cat_pipe.named_steps["ohe"]
             categorical_width = len(ohe.get_feature_names_out(categorical_cols))
+            # categorical allowed_values 제약 적용
+            start = artifacts.mol_feature_dim
+            offset = 0
+            for col in categorical_cols:
+                cfg = ranges.get(col)
+                cat_vals = list(ohe.categories_[offset])
+                col_width = len(cat_vals)
+                slice_start = start + offset
+                slice_end = slice_start + col_width
+                if cfg is not None and cfg.allowed_values:
+                    allowed_set = {str(v) for v in cfg.allowed_values}
+                    allowed_idx = [i for i, v in enumerate(cat_vals) if str(v) in allowed_set]
+                    if allowed_idx:
+                        for r in range(candidates.shape[0]):
+                            row_slice = candidates[r, slice_start:slice_end]
+                            best_local = max(allowed_idx, key=lambda j: row_slice[j])
+                            row_slice[:] = 0.0
+                            row_slice[best_local] = 1.0
+                            candidates[r, slice_start:slice_end] = row_slice
+                offset += col_width
 
         for n_idx, col in enumerate(numeric_cols):
+            if scaler is None:
+                continue
             cfg = ranges.get(col)
             if cfg is None:
                 continue
@@ -191,8 +221,20 @@ class ProphetGPPipeline:
 
         for i, candidate in enumerate(raw_candidates):
             cand_mol = candidate[: artifacts.mol_feature_dim]
-            distances = np.linalg.norm(train_mol - cand_mol, axis=1)
-            nearest_idx = int(np.argmin(distances))
+            if (
+                artifacts.allowed_reactant_vectors is not None
+                and artifacts.allowed_reactant_inputs is not None
+                and artifacts.allowed_reactant_smiles is not None
+            ):
+                distances = np.linalg.norm(artifacts.allowed_reactant_vectors - cand_mol, axis=1)
+                nearest_idx = int(np.argmin(distances))
+                nearest_input = artifacts.allowed_reactant_inputs[nearest_idx]
+                nearest_smiles = artifacts.allowed_reactant_smiles[nearest_idx]
+            else:
+                distances = np.linalg.norm(train_mol - cand_mol, axis=1)
+                nearest_idx = int(np.argmin(distances))
+                nearest_input = artifacts.reactant_inputs[nearest_idx]
+                nearest_smiles = artifacts.reactant_smiles[nearest_idx]
             means = pred_mean[i]
             variances = pred_var[i]
             target_predictions = {
@@ -240,8 +282,8 @@ class ProphetGPPipeline:
                 "information_score": information_score,
                 "total_score": total_score,
                 "ranking_strategy": chosen_strategy,
-                "nearest_known_reactants_input": artifacts.reactant_inputs[nearest_idx],
-                "nearest_known_reactants_smiles": artifacts.reactant_smiles[nearest_idx],
+                "nearest_known_reactants_input": nearest_input,
+                "nearest_known_reactants_smiles": nearest_smiles,
                 "nearest_reactant_distance": float(distances[nearest_idx]),
             }
             if self.config.data.reactant_allowed_values:

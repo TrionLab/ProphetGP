@@ -47,6 +47,13 @@ class BayesianOptimizer:
                 bounds=bounds,
                 n_candidates=n_candidates,
             )
+        if self.objective == "minimize" and surrogate.train_y.shape[1] == 1:
+            return self._suggest_by_single_objective_random_search(
+                surrogate=surrogate,
+                bounds=bounds,
+                n_candidates=n_candidates,
+                objective="minimize",
+            )
         if surrogate.train_y.shape[1] > 1:
             return self._suggest_multiobjective_output(
                 surrogate=surrogate,
@@ -98,7 +105,8 @@ class BayesianOptimizer:
             size=(self.target_search_size, lower.shape[0]),
         )
         mean, _ = surrogate.predict(candidate_pool)
-        gap = np.abs(mean - self.target_value)
+        # single-output 경로이므로 1차원으로 평탄화해 정렬한다.
+        gap = np.abs(np.asarray(mean, dtype=np.float64).reshape(-1) - float(self.target_value))
         best_idx = np.argsort(gap)[:n_candidates]
         return candidate_pool[best_idx]
 
@@ -162,4 +170,31 @@ class BayesianOptimizer:
             else:
                 raise ValueError(f"Unknown objective: {objective}")
         best_idx = np.argsort(-scores)[:n_candidates]
+        return candidate_pool[best_idx]
+
+    def _suggest_by_single_objective_random_search(
+        self,
+        surrogate: GPSurrogate,
+        bounds: np.ndarray,
+        n_candidates: int,
+        objective: str,
+    ) -> np.ndarray:
+        lower = bounds[0]
+        upper = bounds[1]
+        if lower.shape != upper.shape:
+            raise ValueError("Invalid bounds shape.")
+        rng = np.random.default_rng(seed=42)
+        candidate_pool = rng.uniform(
+            low=lower,
+            high=upper,
+            size=(self.target_search_size, lower.shape[0]),
+        )
+        mean, _ = surrogate.predict(candidate_pool)
+        score = np.asarray(mean, dtype=np.float64).reshape(-1)
+        if objective == "minimize":
+            best_idx = np.argsort(score)[:n_candidates]
+        elif objective == "maximize":
+            best_idx = np.argsort(-score)[:n_candidates]
+        else:
+            raise ValueError(f"Unknown objective: {objective}")
         return candidate_pool[best_idx]
