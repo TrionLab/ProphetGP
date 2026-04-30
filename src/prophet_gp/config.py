@@ -27,6 +27,7 @@ class FeaturizationConfig(BaseModel):
 
 class OptimizationConfig(BaseModel):
     objective: Literal["maximize", "minimize", "target"] = "maximize"
+    suggestion_strategy: Literal["best_output", "best_information"] = "best_output"
     target_value: Optional[float] = None
     n_restarts: int = 10
     raw_samples: int = 128

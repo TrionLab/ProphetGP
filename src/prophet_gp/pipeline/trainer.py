@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+from sklearn.compose import ColumnTransformer
 
 from prophet_gp.config import AppConfig
 from prophet_gp.data.dataset import PreparedDataset, ReactionDatasetService
@@ -17,6 +18,18 @@ class TrainingArtifacts:
     x_train: np.ndarray
     y_train: np.ndarray
     feature_names: List[str]
+    mol_feature_dim: int
+    reactant_inputs: List[str]
+    reactant_smiles: List[List[str]]
+    condition_columns: List[str]
+    condition_types: Dict[str, str]
+    condition_transformer: Optional[ColumnTransformer]
+
+
+@dataclass
+class SuggestionResult:
+    raw_candidates: np.ndarray
+    decoded_candidates: List[Dict[str, Any]]
 
 
 class ProphetGPPipeline:
@@ -56,7 +69,17 @@ class ProphetGPPipeline:
 
         y = prepared.y.to_numpy(dtype=np.float32)
         feature_names = [f"x{i}" for i in range(x.shape[1])]
-        return TrainingArtifacts(x_train=x, y_train=y, feature_names=feature_names)
+        return TrainingArtifacts(
+            x_train=x,
+            y_train=y,
+            feature_names=feature_names,
+            mol_feature_dim=x_mol.shape[1],
+            reactant_inputs=prepared.frame[prepared.schema.reactant_column].astype(str).tolist(),
+            reactant_smiles=prepared.resolved_smiles,
+            condition_columns=prepared.schema.condition_columns,
+            condition_types=prepared.schema.condition_types,
+            condition_transformer=transformer if prepared.schema.condition_columns else None,
+        )
 
     def train_from_csv(self, data_path: str) -> TrainingArtifacts:
         prepared = self.dataset_service.load_csv(data_path)
@@ -64,7 +87,97 @@ class ProphetGPPipeline:
         self.surrogate.fit(artifacts.x_train, artifacts.y_train)
         return artifacts
 
-    def suggest_next_experiments(self, artifacts: TrainingArtifacts, n_candidates: int) -> np.ndarray:
+    def suggest_next_experiments(
+        self,
+        artifacts: TrainingArtifacts,
+        n_candidates: int,
+        strategy: Optional[str] = None,
+    ) -> SuggestionResult:
         x = artifacts.x_train
         bounds = np.vstack([x.min(axis=0), x.max(axis=0)])
-        return self.optimizer.suggest(self.surrogate, bounds=bounds, n_candidates=n_candidates)
+        chosen_strategy = strategy or self.config.optimization.suggestion_strategy
+        raw_candidates = self.optimizer.suggest(
+            self.surrogate,
+            bounds=bounds,
+            n_candidates=n_candidates,
+            strategy=chosen_strategy,
+        )
+        decoded = self._decode_candidates(raw_candidates, artifacts)
+        return SuggestionResult(raw_candidates=raw_candidates, decoded_candidates=decoded)
+
+    def _decode_candidates(
+        self, raw_candidates: np.ndarray, artifacts: TrainingArtifacts
+    ) -> List[Dict[str, Any]]:
+        decoded_rows: List[Dict[str, Any]] = []
+        train_mol = artifacts.x_train[:, : artifacts.mol_feature_dim]
+        pred_mean, pred_var = self.surrogate.predict(raw_candidates)
+
+        for i, candidate in enumerate(raw_candidates):
+            cand_mol = candidate[: artifacts.mol_feature_dim]
+            distances = np.linalg.norm(train_mol - cand_mol, axis=1)
+            nearest_idx = int(np.argmin(distances))
+            pred_std = float(np.sqrt(max(float(pred_var[i]), 0.0)))
+
+            target_gap = None
+            if self.config.optimization.target_value is not None:
+                target_gap = abs(float(pred_mean[i]) - float(self.config.optimization.target_value))
+
+            row: Dict[str, Any] = {
+                "predicted_target_mean": float(pred_mean[i]),
+                "predicted_target_std": pred_std,
+                "target_gap": target_gap,
+                "nearest_known_reactants_input": artifacts.reactant_inputs[nearest_idx],
+                "nearest_known_reactants_smiles": artifacts.reactant_smiles[nearest_idx],
+                "nearest_reactant_distance": float(distances[nearest_idx]),
+            }
+
+            if artifacts.condition_columns:
+                cand_cond = candidate[artifacts.mol_feature_dim :].reshape(1, -1)
+                cond_values = self._inverse_condition_values(cand_cond, artifacts)
+                row.update(cond_values)
+            decoded_rows.append(row)
+        return decoded_rows
+
+    def _inverse_condition_values(
+        self, cond_vector: np.ndarray, artifacts: TrainingArtifacts
+    ) -> Dict[str, Any]:
+        if artifacts.condition_transformer is None:
+            return {}
+        try:
+            restored = artifacts.condition_transformer.inverse_transform(cond_vector)
+            values = restored[0]
+            return {
+                col: (float(val) if isinstance(val, (np.floating, float, int)) else val)
+                for col, val in zip(artifacts.condition_columns, values)
+            }
+        except Exception:
+            restored: Dict[str, Any] = {}
+            transformer = artifacts.condition_transformer
+            categorical_cols = [
+                c for c in artifacts.condition_columns if artifacts.condition_types.get(c) == "categorical"
+            ]
+            numeric_cols = [c for c in artifacts.condition_columns if c not in categorical_cols]
+
+            idx = 0
+            if categorical_cols and "categorical" in transformer.named_transformers_:
+                cat_pipe = transformer.named_transformers_["categorical"]
+                ohe = cat_pipe.named_steps["ohe"]
+                cat_width = len(ohe.get_feature_names_out(categorical_cols))
+                cat_slice = cond_vector[:, idx : idx + cat_width]
+                decoded_cat = ohe.inverse_transform(cat_slice)[0]
+                for col, value in zip(categorical_cols, decoded_cat):
+                    restored[col] = value
+                idx += cat_width
+
+            if numeric_cols and "numeric" in transformer.named_transformers_:
+                num_pipe = transformer.named_transformers_["numeric"]
+                scaler = num_pipe.named_steps["scaler"]
+                num_width = len(numeric_cols)
+                num_slice = cond_vector[:, idx : idx + num_width]
+                decoded_num = scaler.inverse_transform(num_slice)[0]
+                for col, value in zip(numeric_cols, decoded_num):
+                    restored[col] = float(value)
+
+            for col in artifacts.condition_columns:
+                restored.setdefault(col, None)
+            return restored

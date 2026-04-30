@@ -12,6 +12,7 @@ featurization:
 
 optimization:
   objective: maximize
+  suggestion_strategy: best_output
   target_value: null
   n_restarts: 10
   raw_samples: 128

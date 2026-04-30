@@ -20,6 +20,12 @@ def _build_parser() -> argparse.ArgumentParser:
     suggest.add_argument("--data", required=True, help="CSV path.")
     suggest.add_argument("--config", required=True, help="YAML config path.")
     suggest.add_argument("--n-candidates", type=int, default=5)
+    suggest.add_argument(
+        "--strategy",
+        choices=["best_output", "best_information"],
+        default=None,
+        help="Recommendation strategy override.",
+    )
 
     append = sub.add_parser("append", help="Append newly observed batch dataset.")
     append.add_argument("--base-data", required=True)
@@ -66,8 +72,17 @@ def main() -> None:
         suggestions = pipeline.suggest_next_experiments(
             artifacts,
             n_candidates=args.n_candidates,
+            strategy=args.strategy,
         )
-        print(json.dumps({"candidates": suggestions.tolist()}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "raw_candidates": suggestions.raw_candidates.tolist(),
+                    "decoded_candidates": suggestions.decoded_candidates,
+                },
+                indent=2,
+            )
+        )
         return
 
     raise RuntimeError("Unknown command")

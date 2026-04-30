@@ -33,9 +33,18 @@ class BayesianOptimizer:
         surrogate: GPSurrogate,
         bounds: np.ndarray,
         n_candidates: int = 1,
+        strategy: str = "best_output",
     ) -> np.ndarray:
         if surrogate.model is None or surrogate.train_y is None:
             raise RuntimeError("Surrogate model must be trained before suggestion.")
+        if strategy not in {"best_output", "best_information"}:
+            raise ValueError("strategy must be 'best_output' or 'best_information'")
+        if strategy == "best_information":
+            return self._suggest_by_information_gain(
+                surrogate=surrogate,
+                bounds=bounds,
+                n_candidates=n_candidates,
+            )
         if self.objective == "target":
             return self._suggest_by_target_matching(
                 surrogate=surrogate,
@@ -81,4 +90,25 @@ class BayesianOptimizer:
         mean, _ = surrogate.predict(candidate_pool)
         gap = np.abs(mean - self.target_value)
         best_idx = np.argsort(gap)[:n_candidates]
+        return candidate_pool[best_idx]
+
+    def _suggest_by_information_gain(
+        self,
+        surrogate: GPSurrogate,
+        bounds: np.ndarray,
+        n_candidates: int,
+    ) -> np.ndarray:
+        lower = bounds[0]
+        upper = bounds[1]
+        if lower.shape != upper.shape:
+            raise ValueError("Invalid bounds shape.")
+        rng = np.random.default_rng(seed=42)
+        candidate_pool = rng.uniform(
+            low=lower,
+            high=upper,
+            size=(self.target_search_size, lower.shape[0]),
+        )
+        _, var = surrogate.predict(candidate_pool)
+        info_score = np.asarray(var, dtype=np.float64)
+        best_idx = np.argsort(-info_score)[:n_candidates]
         return candidate_pool[best_idx]
