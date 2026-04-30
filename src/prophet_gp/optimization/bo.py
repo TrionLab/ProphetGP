@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from botorch.acquisition import qExpectedImprovement
+from botorch.acquisition.objective import GenericMCObjective
 from botorch.optim import optimize_acqf
 from typing import Dict, Optional
 
@@ -47,13 +48,6 @@ class BayesianOptimizer:
                 bounds=bounds,
                 n_candidates=n_candidates,
             )
-        if self.objective == "minimize" and surrogate.train_y.shape[1] == 1:
-            return self._suggest_by_single_objective_random_search(
-                surrogate=surrogate,
-                bounds=bounds,
-                n_candidates=n_candidates,
-                objective="minimize",
-            )
         if surrogate.train_y.shape[1] > 1:
             return self._suggest_multiobjective_output(
                 surrogate=surrogate,
@@ -69,11 +63,17 @@ class BayesianOptimizer:
                 n_candidates=n_candidates,
             )
 
-        best_f = surrogate.train_y.max().item()
-        if self.objective == "minimize":
-            best_f = -best_f
+        objective = None
+        if self.objective == "maximize":
+            best_f = surrogate.train_y.max().item()
+        elif self.objective == "minimize":
+            # EI는 최대화 형태이므로, -f(x)를 최대화하는 objective를 사용한다.
+            best_f = (-surrogate.train_y).max().item()
+            objective = GenericMCObjective(lambda Y, X=None: -Y.squeeze(-1))
+        else:
+            raise ValueError(f"Unsupported objective in EI path: {self.objective}")
 
-        acquisition = qExpectedImprovement(model=surrogate.model, best_f=best_f)
+        acquisition = qExpectedImprovement(model=surrogate.model, best_f=best_f, objective=objective)
         bounds_tensor = torch.tensor(bounds, dtype=torch.float64)
         candidates, _ = optimize_acqf(
             acq_function=acquisition,
@@ -172,29 +172,3 @@ class BayesianOptimizer:
         best_idx = np.argsort(-scores)[:n_candidates]
         return candidate_pool[best_idx]
 
-    def _suggest_by_single_objective_random_search(
-        self,
-        surrogate: GPSurrogate,
-        bounds: np.ndarray,
-        n_candidates: int,
-        objective: str,
-    ) -> np.ndarray:
-        lower = bounds[0]
-        upper = bounds[1]
-        if lower.shape != upper.shape:
-            raise ValueError("Invalid bounds shape.")
-        rng = np.random.default_rng(seed=42)
-        candidate_pool = rng.uniform(
-            low=lower,
-            high=upper,
-            size=(self.target_search_size, lower.shape[0]),
-        )
-        mean, _ = surrogate.predict(candidate_pool)
-        score = np.asarray(mean, dtype=np.float64).reshape(-1)
-        if objective == "minimize":
-            best_idx = np.argsort(score)[:n_candidates]
-        elif objective == "maximize":
-            best_idx = np.argsort(-score)[:n_candidates]
-        else:
-            raise ValueError(f"Unknown objective: {objective}")
-        return candidate_pool[best_idx]
