@@ -18,6 +18,7 @@ from prophet_gp.optimization.bo import BayesianOptimizer
 class TrainingArtifacts:
     x_train: np.ndarray
     y_train: np.ndarray
+    target_columns: List[str]
     feature_names: List[str]
     mol_feature_dim: int
     reactant_inputs: List[str]
@@ -73,6 +74,7 @@ class ProphetGPPipeline:
         return TrainingArtifacts(
             x_train=x,
             y_train=y,
+            target_columns=prepared.schema.target_columns,
             feature_names=feature_names,
             mol_feature_dim=x_mol.shape[1],
             reactant_inputs=prepared.frame[prepared.schema.reactant_column].astype(str).tolist(),
@@ -102,9 +104,11 @@ class ProphetGPPipeline:
             bounds=bounds,
             n_candidates=n_candidates,
             strategy=chosen_strategy,
+            target_objectives=self._build_target_objective_map(artifacts),
+            target_names=artifacts.target_columns,
         )
         raw_candidates = self._apply_input_constraints(raw_candidates, artifacts)
-        decoded = self._decode_candidates(raw_candidates, artifacts)
+        decoded = self._decode_candidates(raw_candidates, artifacts, chosen_strategy)
         return SuggestionResult(raw_candidates=raw_candidates, decoded_candidates=decoded)
 
     def _apply_input_constraints(
@@ -175,26 +179,67 @@ class ProphetGPPipeline:
                 candidates[:, feat_idx] = np.minimum(candidates[:, feat_idx], max_scaled)
 
     def _decode_candidates(
-        self, raw_candidates: np.ndarray, artifacts: TrainingArtifacts
+        self,
+        raw_candidates: np.ndarray,
+        artifacts: TrainingArtifacts,
+        chosen_strategy: str,
     ) -> List[Dict[str, Any]]:
         decoded_rows: List[Dict[str, Any]] = []
         train_mol = artifacts.x_train[:, : artifacts.mol_feature_dim]
         pred_mean, pred_var = self.surrogate.predict(raw_candidates)
+        objective_map = self._build_target_objective_map(artifacts)
 
         for i, candidate in enumerate(raw_candidates):
             cand_mol = candidate[: artifacts.mol_feature_dim]
             distances = np.linalg.norm(train_mol - cand_mol, axis=1)
             nearest_idx = int(np.argmin(distances))
-            pred_std = float(np.sqrt(max(float(pred_var[i]), 0.0)))
+            means = pred_mean[i]
+            variances = pred_var[i]
+            target_predictions = {
+                t: float(means[t_idx]) for t_idx, t in enumerate(artifacts.target_columns)
+            }
+            target_uncertainty = {
+                t: float(np.sqrt(max(float(variances[t_idx]), 0.0)))
+                for t_idx, t in enumerate(artifacts.target_columns)
+            }
+            target_gap: Dict[str, Optional[float]] = {}
+            for t in artifacts.target_columns:
+                t_cfg = objective_map.get(t, {})
+                t_target = t_cfg.get("target_value")
+                target_gap[t] = (
+                    abs(target_predictions[t] - float(t_target)) if t_target is not None else None
+                )
 
-            target_gap = None
-            if self.config.optimization.target_value is not None:
-                target_gap = abs(float(pred_mean[i]) - float(self.config.optimization.target_value))
+            objective_score = 0.0
+            information_score = 0.0
+            for t in artifacts.target_columns:
+                t_cfg = objective_map.get(t, {})
+                objective = t_cfg.get("objective", "maximize")
+                t_target = t_cfg.get("target_value")
+                weight = float(t_cfg.get("weight", 1.0))
+                mean_val = target_predictions[t]
+                std_val = target_uncertainty[t]
+                information_score += weight * std_val
+                if objective == "maximize":
+                    objective_score += weight * mean_val
+                elif objective == "minimize":
+                    objective_score += -weight * mean_val
+                elif objective == "target":
+                    if t_target is None:
+                        raise ValueError(f"target_value is required for target objective: {t}")
+                    objective_score += -weight * abs(mean_val - float(t_target))
+                else:
+                    raise ValueError(f"Unknown objective: {objective}")
+            total_score = information_score if chosen_strategy == "best_information" else objective_score
 
             row: Dict[str, Any] = {
-                "predicted_target_mean": float(pred_mean[i]),
-                "predicted_target_std": pred_std,
+                "predicted_target_mean": target_predictions,
+                "predicted_target_std": target_uncertainty,
                 "target_gap": target_gap,
+                "objective_score": objective_score,
+                "information_score": information_score,
+                "total_score": total_score,
+                "ranking_strategy": chosen_strategy,
                 "nearest_known_reactants_input": artifacts.reactant_inputs[nearest_idx],
                 "nearest_known_reactants_smiles": artifacts.reactant_smiles[nearest_idx],
                 "nearest_reactant_distance": float(distances[nearest_idx]),
@@ -252,3 +297,22 @@ class ProphetGPPipeline:
             for col in artifacts.condition_columns:
                 restored.setdefault(col, None)
             return restored
+
+    def _build_target_objective_map(self, artifacts: TrainingArtifacts) -> Dict[str, Dict[str, Any]]:
+        explicit = self.config.optimization.target_objectives
+        objective_map: Dict[str, Dict[str, Any]] = {}
+        for t in artifacts.target_columns:
+            if t in explicit:
+                obj = explicit[t]
+                objective_map[t] = {
+                    "objective": obj.objective,
+                    "target_value": obj.target_value,
+                    "weight": obj.weight,
+                }
+            else:
+                objective_map[t] = {
+                    "objective": self.config.optimization.objective,
+                    "target_value": self.config.optimization.target_value,
+                    "weight": 1.0,
+                }
+        return objective_map

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from botorch.acquisition import qExpectedImprovement
 from botorch.optim import optimize_acqf
-from typing import Optional
+from typing import Dict, Optional
 
 from prophet_gp.models.gp_surrogate import GPSurrogate
 
@@ -34,6 +34,8 @@ class BayesianOptimizer:
         bounds: np.ndarray,
         n_candidates: int = 1,
         strategy: str = "best_output",
+        target_objectives: Optional[Dict[str, dict]] = None,
+        target_names: Optional[list[str]] = None,
     ) -> np.ndarray:
         if surrogate.model is None or surrogate.train_y is None:
             raise RuntimeError("Surrogate model must be trained before suggestion.")
@@ -44,6 +46,14 @@ class BayesianOptimizer:
                 surrogate=surrogate,
                 bounds=bounds,
                 n_candidates=n_candidates,
+            )
+        if surrogate.train_y.shape[1] > 1:
+            return self._suggest_multiobjective_output(
+                surrogate=surrogate,
+                bounds=bounds,
+                n_candidates=n_candidates,
+                target_objectives=target_objectives or {},
+                target_names=target_names or [],
             )
         if self.objective == "target":
             return self._suggest_by_target_matching(
@@ -110,5 +120,46 @@ class BayesianOptimizer:
         )
         _, var = surrogate.predict(candidate_pool)
         info_score = np.asarray(var, dtype=np.float64)
+        if info_score.ndim == 2:
+            info_score = info_score.sum(axis=1)
         best_idx = np.argsort(-info_score)[:n_candidates]
+        return candidate_pool[best_idx]
+
+    def _suggest_multiobjective_output(
+        self,
+        surrogate: GPSurrogate,
+        bounds: np.ndarray,
+        n_candidates: int,
+        target_objectives: Dict[str, dict],
+        target_names: list[str],
+    ) -> np.ndarray:
+        lower = bounds[0]
+        upper = bounds[1]
+        if lower.shape != upper.shape:
+            raise ValueError("Invalid bounds shape.")
+        rng = np.random.default_rng(seed=42)
+        candidate_pool = rng.uniform(
+            low=lower,
+            high=upper,
+            size=(self.target_search_size, lower.shape[0]),
+        )
+        mean, _ = surrogate.predict(candidate_pool)
+        scores = np.zeros(candidate_pool.shape[0], dtype=np.float64)
+        for idx, target_name in enumerate(target_names):
+            obj_cfg = target_objectives.get(target_name, {})
+            objective = obj_cfg.get("objective", self.objective)
+            target_value = obj_cfg.get("target_value", self.target_value)
+            weight = float(obj_cfg.get("weight", 1.0))
+            target_mean = mean[:, idx]
+            if objective == "maximize":
+                scores += weight * target_mean
+            elif objective == "minimize":
+                scores += -weight * target_mean
+            elif objective == "target":
+                if target_value is None:
+                    raise ValueError(f"target_value is required for target objective: {target_name}")
+                scores += -weight * np.abs(target_mean - float(target_value))
+            else:
+                raise ValueError(f"Unknown objective: {objective}")
+        best_idx = np.argsort(-scores)[:n_candidates]
         return candidate_pool[best_idx]

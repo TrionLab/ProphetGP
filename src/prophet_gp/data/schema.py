@@ -11,7 +11,7 @@ ConditionType = Literal["categorical", "continuous", "discrete"]
 @dataclass(frozen=True)
 class DatasetSchema:
     reactant_column: str
-    target_column: str
+    target_columns: List[str]
     condition_columns: List[str]
     condition_types: Dict[str, ConditionType]
 

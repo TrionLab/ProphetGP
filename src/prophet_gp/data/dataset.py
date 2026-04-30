@@ -20,7 +20,7 @@ class PreparedDataset:
     frame: pd.DataFrame
     resolved_smiles: List[List[str]]
     schema: DatasetSchema
-    y: pd.Series
+    y: pd.DataFrame
 
 
 class ReactionDatasetService:
@@ -67,11 +67,16 @@ class ReactionDatasetService:
 
     def _prepare(self, df: pd.DataFrame) -> PreparedDataset:
         react_col = self.config.reactant_column
-        target_col = self.config.target_column
+        target_cols = (
+            [self.config.target_column]
+            if isinstance(self.config.target_column, str)
+            else list(self.config.target_column)
+        )
         if react_col not in df.columns:
             raise ValueError(f"Missing reactant column: {react_col}")
-        if target_col not in df.columns:
-            raise ValueError(f"Missing target column: {target_col}")
+        for target_col in target_cols:
+            if target_col not in df.columns:
+                raise ValueError(f"Missing target column: {target_col}")
 
         df = df.copy()
         reactants = df[react_col].astype(str).tolist()
@@ -85,15 +90,15 @@ class ReactionDatasetService:
 
         ignore = set(self.config.ignore_columns)
         condition_cols = [
-            c for c in df.columns if c not in {react_col, target_col} and c not in ignore
+            c for c in df.columns if c not in ({react_col} | set(target_cols)) and c not in ignore
         ]
         inferred = {col: infer_condition_type(df[col]) for col in condition_cols}
         inferred.update(self.config.explicit_condition_types)
 
         schema = DatasetSchema(
             reactant_column=react_col,
-            target_column=target_col,
+            target_columns=target_cols,
             condition_columns=condition_cols,
             condition_types=inferred,
         )
-        return PreparedDataset(frame=df, resolved_smiles=resolved, schema=schema, y=df[target_col])
+        return PreparedDataset(frame=df, resolved_smiles=resolved, schema=schema, y=df[target_cols])

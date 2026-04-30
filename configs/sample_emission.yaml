@@ -1,7 +1,9 @@
 # sample_data.csv: Mol.1 + Temperature → Emission Peak 예시용
 data:
   reactant_column: Mol.1
-  target_column: "Emission Peak"
+  target_column:
+    - "Emission Peak"
+    - "FWHM"
   reactant_delimiter: "|"
   reactant_allowed_values:
     - "1,5-Diaminonaphthalene"
@@ -13,7 +15,6 @@ data:
       min: 0
       max: 600
   ignore_columns:
-    - FWHM
     - PLQY
   explicit_condition_types:
     Temperature: continuous
@@ -26,6 +27,14 @@ optimization:
   objective: target
   suggestion_strategy: best_output
   target_value: 495.0
+  target_objectives:
+    Emission Peak:
+      objective: target
+      target_value: 495.0
+      weight: 1.0
+    FWHM:
+      objective: minimize
+      weight: 0.5
   n_restarts: 10
   raw_samples: 128
   target_search_size: 5000

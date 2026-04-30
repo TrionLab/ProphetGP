@@ -23,6 +23,11 @@ optimization:
   objective: maximize
   suggestion_strategy: best_output
   target_value: null
+  target_objectives: {}
+  # 예:
+  # target_objectives:
+  #   Emission Peak: { objective: target, target_value: 500, weight: 1.0 }
+  #   FWHM: { objective: minimize, weight: 0.5 }
   n_restarts: 10
   raw_samples: 128
   target_search_size: 4096

@@ -74,11 +74,17 @@ def main() -> None:
             n_candidates=args.n_candidates,
             strategy=args.strategy,
         )
+        ranked = sorted(
+            suggestions.decoded_candidates,
+            key=lambda row: float(row.get("total_score", float("-inf"))),
+            reverse=True,
+        )
         print(
             json.dumps(
                 {
                     "raw_candidates": suggestions.raw_candidates.tolist(),
                     "decoded_candidates": suggestions.decoded_candidates,
+                    "ranked_candidates": ranked,
                 },
                 indent=2,
             )

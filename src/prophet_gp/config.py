@@ -15,9 +15,15 @@ class InputRangeConfig(BaseModel):
     allowed_values: Optional[List[Union[str, float, int]]] = None
 
 
+class TargetObjectiveConfig(BaseModel):
+    objective: Literal["maximize", "minimize", "target"] = "maximize"
+    target_value: Optional[float] = None
+    weight: float = 1.0
+
+
 class DataConfig(BaseModel):
     reactant_column: str = "reactants"
-    target_column: str = "target"
+    target_column: Union[str, List[str]] = "target"
     reactant_delimiter: str = "|"
     ignore_columns: List[str] = Field(
         default_factory=list,
@@ -43,6 +49,7 @@ class OptimizationConfig(BaseModel):
     objective: Literal["maximize", "minimize", "target"] = "maximize"
     suggestion_strategy: Literal["best_output", "best_information"] = "best_output"
     target_value: Optional[float] = None
+    target_objectives: Dict[str, TargetObjectiveConfig] = Field(default_factory=dict)
     n_restarts: int = 10
     raw_samples: int = 128
     target_search_size: int = 4096
