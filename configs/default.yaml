@@ -1,0 +1,17 @@
+data:
+  reactant_column: reactants
+  target_column: target
+  reactant_delimiter: "|"
+  explicit_condition_types: {}
+  # 예: {"catalyst": "categorical", "temperature": "continuous"}
+
+featurization:
+  featuriser: ecfp_fingerprints
+  # available: "auto" 또는 gauche에서 조회되는 featuriser 이름
+  combine_strategy: concat
+
+optimization:
+  objective: maximize
+  n_restarts: 10
+  raw_samples: 128
+  n_candidates: 5

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prophet-gp"
+version = "0.1.0"
+description = "Reaction property optimization platform using gauche + GP Bayesian optimization."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "ProphetGP Team" }]
+dependencies = [
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "scikit-learn>=1.3",
+  "gpytorch>=1.11",
+  "botorch>=0.10",
+  "torch>=2.1",
+  "PyYAML>=6.0",
+  "pydantic>=2.6",
+  "requests>=2.31",
+  "gauche>=0.3.0",
+  "rdkit>=2023.9.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  "mypy>=1.8",
+]
+
+[project.scripts]
+prophet-gp = "prophet_gp.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
