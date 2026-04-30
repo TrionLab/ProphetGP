@@ -63,17 +63,21 @@ class BayesianOptimizer:
                 n_candidates=n_candidates,
             )
 
-        objective = None
+        acquisition_objective = None
         if self.objective == "maximize":
             best_f = surrogate.train_y.max().item()
         elif self.objective == "minimize":
             # EI는 최대화 형태이므로, -f(x)를 최대화하는 objective를 사용한다.
             best_f = (-surrogate.train_y).max().item()
-            objective = GenericMCObjective(lambda Y, X=None: -Y.squeeze(-1))
+            acquisition_objective = GenericMCObjective(lambda Y, X=None: -Y.squeeze(-1))
         else:
             raise ValueError(f"Unsupported objective in EI path: {self.objective}")
 
-        acquisition = qExpectedImprovement(model=surrogate.model, best_f=best_f, objective=objective)
+        acquisition = qExpectedImprovement(
+            model=surrogate.model,
+            best_f=best_f,
+            objective=acquisition_objective,
+        )
         bounds_tensor = torch.tensor(bounds, dtype=torch.float64)
         candidates, _ = optimize_acqf(
             acq_function=acquisition,

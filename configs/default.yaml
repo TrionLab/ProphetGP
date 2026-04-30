@@ -25,7 +25,7 @@ optimization:
   target_value: null
   target_objectives: {}
   # 예:
-  # target_objectives:
+  # target_objectives:  # 다중 타깃일 때 컬럼별 objective/target_value/weight 지정
   #   Emission Peak: { objective: target, target_value: 500, weight: 1.0 }
   #   FWHM: { objective: minimize, weight: 0.5 }
   n_restarts: 10

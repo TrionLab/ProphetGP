@@ -161,12 +161,11 @@ class ProphetGPPipeline:
         transformer = artifacts.condition_transformer
         categorical_cols = [c for c in artifacts.condition_columns if artifacts.condition_types.get(c) == "categorical"]
         numeric_cols = [c for c in artifacts.condition_columns if c not in categorical_cols]
-        if not numeric_cols or "numeric" not in transformer.named_transformers_:
-            pass
-        num_pipe = transformer.named_transformers_["numeric"]
         scaler = None
-        if isinstance(num_pipe, Pipeline):
-            scaler = num_pipe.named_steps.get("scaler")
+        if numeric_cols and "numeric" in transformer.named_transformers_:
+            num_pipe = transformer.named_transformers_["numeric"]
+            if isinstance(num_pipe, Pipeline):
+                scaler = num_pipe.named_steps.get("scaler")
 
         categorical_width = 0
         if categorical_cols and "categorical" in transformer.named_transformers_:
@@ -282,6 +281,8 @@ class ProphetGPPipeline:
                 "information_score": information_score,
                 "total_score": total_score,
                 "ranking_strategy": chosen_strategy,
+                "mapped_reactants_input": nearest_input,
+                "mapped_reactants_smiles": nearest_smiles,
                 "nearest_known_reactants_input": nearest_input,
                 "nearest_known_reactants_smiles": nearest_smiles,
                 "nearest_reactant_distance": float(distances[nearest_idx]),
