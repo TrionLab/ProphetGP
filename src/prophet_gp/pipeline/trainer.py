@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler
 
 from prophet_gp.config import AppConfig
 from prophet_gp.data.dataset import PreparedDataset, ReactionDatasetService
@@ -29,6 +30,9 @@ class TrainingArtifacts:
     allowed_reactant_vectors: Optional[np.ndarray] = None
     allowed_reactant_inputs: Optional[List[str]] = None
     allowed_reactant_smiles: Optional[List[List[str]]] = None
+    gp_input_scaler: Optional[MinMaxScaler] = None
+    # GP 표준화 전(분자+조건 결합) 특징; standardize_gp_inputs=True일 때만 설정.
+    x_train_pre_gp_scale: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -42,7 +46,7 @@ class ProphetGPPipeline:
         self.config = config
         self.dataset_service = ReactionDatasetService(config.data)
         self.featurizers = GaucheFeaturizerRegistry()
-        self.surrogate = GPSurrogate()
+        self.surrogate = GPSurrogate(standardize_targets=config.optimization.standardize_gp_targets)
         self.optimizer = BayesianOptimizer(
             objective=config.optimization.objective,
             n_restarts=config.optimization.n_restarts,
@@ -72,6 +76,12 @@ class ProphetGPPipeline:
         else:
             x = x_mol
 
+        x_pre_gp = np.asarray(x, dtype=np.float32).copy()
+        gp_scaler: Optional[MinMaxScaler] = None
+        if self.config.optimization.standardize_gp_inputs:
+            gp_scaler = MinMaxScaler(feature_range=(0.0, 1.0))
+            x = gp_scaler.fit_transform(np.asarray(x_pre_gp, dtype=np.float64)).astype(np.float32)
+
         y = prepared.y.to_numpy(dtype=np.float32)
         feature_names = [f"x{i}" for i in range(x.shape[1])]
         return TrainingArtifacts(
@@ -85,6 +95,8 @@ class ProphetGPPipeline:
             condition_columns=prepared.schema.condition_columns,
             condition_types=prepared.schema.condition_types,
             condition_transformer=transformer if prepared.schema.condition_columns else None,
+            gp_input_scaler=gp_scaler,
+            x_train_pre_gp_scale=x_pre_gp if gp_scaler is not None else None,
         )
 
     def train_from_csv(self, data_path: str) -> TrainingArtifacts:
@@ -102,7 +114,7 @@ class ProphetGPPipeline:
         x = artifacts.x_train
         bounds = np.vstack([x.min(axis=0), x.max(axis=0)])
         chosen_strategy = strategy or self.config.optimization.suggestion_strategy
-        raw_candidates = self.optimizer.suggest(
+        raw_candidates_scaled = self.optimizer.suggest(
             self.surrogate,
             bounds=bounds,
             n_candidates=n_candidates,
@@ -110,7 +122,19 @@ class ProphetGPPipeline:
             target_objectives=self._build_target_objective_map(artifacts),
             target_names=artifacts.target_columns,
         )
-        raw_candidates = self._apply_input_constraints(raw_candidates, artifacts)
+        if artifacts.gp_input_scaler is not None:
+            cand_pre_gp = artifacts.gp_input_scaler.inverse_transform(
+                np.asarray(raw_candidates_scaled, dtype=np.float64)
+            ).astype(np.float32)
+        else:
+            cand_pre_gp = np.asarray(raw_candidates_scaled, dtype=np.float32).copy()
+        cand_pre_gp = self._apply_input_constraints(cand_pre_gp, artifacts)
+        if artifacts.gp_input_scaler is not None:
+            raw_candidates = artifacts.gp_input_scaler.transform(
+                np.asarray(cand_pre_gp, dtype=np.float64)
+            ).astype(np.float32)
+        else:
+            raw_candidates = cand_pre_gp
         decoded = self._decode_candidates(raw_candidates, artifacts, chosen_strategy)
         return SuggestionResult(raw_candidates=raw_candidates, decoded_candidates=decoded)
 
@@ -214,12 +238,23 @@ class ProphetGPPipeline:
         chosen_strategy: str,
     ) -> List[Dict[str, Any]]:
         decoded_rows: List[Dict[str, Any]] = []
-        train_mol = artifacts.x_train[:, : artifacts.mol_feature_dim]
-        pred_mean, pred_var = self.surrogate.predict(raw_candidates)
+        raw_f = np.asarray(raw_candidates, dtype=np.float64)
+        train_basis = (
+            artifacts.x_train_pre_gp_scale
+            if artifacts.x_train_pre_gp_scale is not None
+            else artifacts.x_train
+        )
+        train_mol = train_basis[:, : artifacts.mol_feature_dim]
+        pred_mean, pred_var = self.surrogate.predict(raw_f)
+        if artifacts.gp_input_scaler is not None:
+            candidates_unscaled = artifacts.gp_input_scaler.inverse_transform(raw_f).astype(np.float32)
+        else:
+            candidates_unscaled = raw_f.astype(np.float32)
         objective_map = self._build_target_objective_map(artifacts)
 
-        for i, candidate in enumerate(raw_candidates):
-            cand_mol = candidate[: artifacts.mol_feature_dim]
+        for i, candidate in enumerate(raw_f):
+            cand_unscaled_row = candidates_unscaled[i]
+            cand_mol = cand_unscaled_row[: artifacts.mol_feature_dim]
             if (
                 artifacts.allowed_reactant_vectors is not None
                 and artifacts.allowed_reactant_inputs is not None
@@ -291,7 +326,7 @@ class ProphetGPPipeline:
                 row["reactant_candidates_scope"] = self.config.data.reactant_allowed_values
 
             if artifacts.condition_columns:
-                cand_cond = candidate[artifacts.mol_feature_dim :].reshape(1, -1)
+                cand_cond = cand_unscaled_row[artifacts.mol_feature_dim :].reshape(1, -1)
                 cond_values = self._inverse_condition_values(cand_cond, artifacts)
                 row.update(cond_values)
             decoded_rows.append(row)

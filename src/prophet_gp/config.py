@@ -48,6 +48,17 @@ class FeaturizationConfig(BaseModel):
 class OptimizationConfig(BaseModel):
     objective: Literal["maximize", "minimize", "target"] = "maximize"
     suggestion_strategy: Literal["best_output", "best_information"] = "best_output"
+    standardize_gp_inputs: bool = Field(
+        default=False,
+        description=(
+            "True면 결합 입력 특징을 학습 데이터 min-max로 [0,1]에 넣는다(BoTorch 단위입방·수치 안정). "
+            "Z-score 표준화와 다르다."
+        ),
+    )
+    standardize_gp_targets: bool = Field(
+        default=False,
+        description="True면 타깃 Y에 StandardScaler(타깃별)를 적용해 GP를 학습한다; predict는 원 스케일로 역변환한다.",
+    )
     target_value: Optional[float] = None
     target_objectives: Dict[str, TargetObjectiveConfig] = Field(default_factory=dict)
     n_restarts: int = 10

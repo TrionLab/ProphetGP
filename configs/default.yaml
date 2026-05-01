@@ -22,6 +22,10 @@ featurization:
 optimization:
   objective: maximize
   suggestion_strategy: best_output
+  # 결합 입력을 학습 min-max로 [0,1] (BoTorch 단위입방 권장)
+  standardize_gp_inputs: false
+  # GP 타깃 Y 표준화(학습만); predict·설정의 target_value는 원 스케일
+  standardize_gp_targets: false
   target_value: null
   target_objectives: {}
   # 예:
