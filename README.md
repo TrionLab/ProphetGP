@@ -41,6 +41,7 @@
   - 반응물 허용 목록
   - 조건별 min/max
   - 조건별 allowed_values
+- (선택) **브라우저 UI**: 설정 편집, 학습, 추천 결과 시각화(아래 **6) 브라우저 웹 UI**)
 
 ---
 
@@ -61,32 +62,43 @@ flowchart LR
 
 ## 4) 설치 방법
 
+터미널(CLI)만 쓸 때:
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .[dev]
+pip install -e ".[dev]"
+```
+
+**브라우저 웹 UI**까지 쓰려면 `web` 옵션을 함께 설치합니다.
+
+```bash
+pip install -e ".[dev,web]"
 ```
 
 ---
 
 ## 5) 가장 빠른 사용법
 
+아래 예시는 저장소에 포함된 `configs/test.yaml`과 `data/sample/sample_data.csv`를 기준으로 합니다.  
+다른 설정 파일 이름을 쓰는 경우 `--config`만 바꿔 주면 됩니다.
+
 ### 5-1. 학습
 
 ```bash
-prophet-gp train --data data/sample/sample_data.csv --config configs/sample_emission.yaml
+prophet-gp train --data data/sample/sample_data.csv --config configs/test.yaml
 ```
 
 ### 5-2. 추천
 
 ```bash
-prophet-gp suggest --data data/sample/sample_data.csv --config configs/sample_emission.yaml --n-candidates 5
+prophet-gp suggest --data data/sample/sample_data.csv --config configs/test.yaml --n-candidates 5
 ```
 
 전략 선택도 가능:
 
 ```bash
-prophet-gp suggest --data data/sample/sample_data.csv --config configs/sample_emission.yaml --n-candidates 5 --strategy best_information
+prophet-gp suggest --data data/sample/sample_data.csv --config configs/test.yaml --n-candidates 5 --strategy best_information
 ```
 
 ### 5-3. 데이터 추가 병합
@@ -106,13 +118,13 @@ prophet-gp append --base-data data/raw/reactions.csv --new-data data/raw/new_bat
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
 ### Step 2) 학습 실행
 
 ```bash
-prophet-gp train --data data/sample/sample_data.csv --config configs/sample_emission.yaml
+prophet-gp train --data data/sample/sample_data.csv --config configs/test.yaml
 ```
 
 정상이라면 `trained`, `rows`, `features` 같은 정보가 나옵니다.
@@ -120,7 +132,7 @@ prophet-gp train --data data/sample/sample_data.csv --config configs/sample_emis
 ### Step 3) 추천 실행
 
 ```bash
-prophet-gp suggest --data data/sample/sample_data.csv --config configs/sample_emission.yaml --n-candidates 5
+prophet-gp suggest --data data/sample/sample_data.csv --config configs/test.yaml --n-candidates 5
 ```
 
 정상이라면 아래 같은 정보가 JSON으로 나옵니다.
@@ -199,14 +211,86 @@ prophet-gp suggest --data data/sample/sample_data.csv --config configs/sample_em
 ### Step 4) 탐색 전략 바꿔보기
 
 ```bash
-prophet-gp suggest --data data/sample/sample_data.csv --config configs/sample_emission.yaml --n-candidates 5 --strategy best_information
+prophet-gp suggest --data data/sample/sample_data.csv --config configs/test.yaml --n-candidates 5 --strategy best_information
 ```
 
 `best_output`은 성능 중심, `best_information`은 정보 획득 중심 추천입니다.
 
 ---
 
-## 6) CSV 데이터 형식
+## 6) 브라우저 웹 UI
+
+FastAPI 기반 웹 서버와 단일 페이지(`index.html`)로, 노트북 `notebooks/prophetgp_quickstart.ipynb`와 같은 흐름을 브라우저에서 실행할 수 있습니다.
+
+### 6-1. 설치
+
+```bash
+pip install -e ".[web]"
+```
+
+개발 도구까지 함께 쓰려면 `pip install -e ".[dev,web]"` 로 한 번에 설치하면 됩니다.
+
+### 6-2. 서버 기동
+
+저장소 **루트 디렉터리**에서 실행하는 것을 권장합니다 (`configs/`, `data/` 경로가 그 기준으로 잡힙니다).
+
+**방법 A — 콘솔 스크립트**
+
+```bash
+prophet-gp-web
+```
+
+**방법 B — uvicorn 직접 실행**
+
+```bash
+uvicorn prophet_gp.web.app:app --host 127.0.0.1 --port 8765
+```
+
+기본 접속 주소: **http://127.0.0.1:8765/**
+
+### 6-3. 환경 변수 (선택)
+
+| 변수 | 설명 |
+|------|------|
+| `PROPHET_GP_ROOT` | 프로젝트 루트가 자동으로 맞지 않을 때(예: 패키지 설치 위치만 다른 경우) 절대 경로로 지정 |
+| `PROPHET_GP_WEB_HOST` | 바인딩 호스트 (기본 `127.0.0.1`) |
+| `PROPHET_GP_WEB_PORT` | 포트 (기본 `8765`) |
+| `PROPHET_GP_WEB_RELOAD` | `true` / `1` / `yes` 이면 코드 변경 시 자동 재시작(개발용) |
+
+### 6-4. 화면에서 할 수 있는 일
+
+1. **`configs` YAML** — 목록에서 파일 선택, 내용 편집, 검증 후 디스크에 저장  
+2. **Featuriser 목록** — 사용 가능한 featuriser 이름 조회  
+3. **학습** — 선택한 설정 파일 + CSV 경로(프로젝트 루트 기준 상대 경로 또는 루트 아래 절대 경로)로 GP 학습. 성공 시 서버에 **세션**이 만들어집니다.  
+4. **다음 실험 후보** — `n_candidates`, `best_output` / `best_information` 전략으로 추천. 후보마다 예측 평균·표준편차, 점수, 매핑된 반응물·조건 등을 표와 막대 그래프로 표시합니다.  
+5. **데이터 병합(선택)** — 기존 CSV + 신규 CSV를 이어 붙여 지정 경로에 저장  
+
+표시되는 **숫자는 소수점 셋째 자리**까지 반올림해 보여 줍니다.
+
+### 6-5. 주의 사항
+
+- HTML 파일을 **`file://`로만 열면** 브라우저 보안 때문에 API 호출이 되지 않습니다. 반드시 위 주소처럼 **서버를 띄운 뒤** 접속하세요.  
+- 학습 세션은 **서버 메모리**에만 있으며, 최대 32개까지 유지됩니다. 서버를 재시작하거나 세션이 밀려 나가면 **다시 학습**해야 추천을 이어갈 수 있습니다.  
+- CSV·병합 출력 경로는 **프로젝트 루트 안**으로만 허용됩니다.
+
+### 6-6. HTTP API (참고)
+
+자동화나 외부 도구 연동 시 같은 프로세스에서 다음 엔드포인트를 사용할 수 있습니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/health` | 동작 확인 및 인식된 프로젝트 루트 |
+| GET | `/api/configs` | `configs/` 아래 yaml 목록 |
+| GET | `/api/config/{파일명}` | YAML 텍스트 및 검증 요약 |
+| PUT | `/api/config/{파일명}` | YAML 저장(본문 UTF-8 텍스트, Pydantic 검증 통과 필요) |
+| GET | `/api/featurisers` | featuriser 이름 목록 |
+| POST | `/api/train` | JSON: `config_name`, `data_path` → `session_id` 등 |
+| POST | `/api/suggest` | JSON: `session_id`, 선택적 `n_candidates`, `strategy` |
+| POST | `/api/append` | JSON: `config_name`, `base_data_path`, `new_data_path`, `out_path` |
+
+---
+
+## 7) CSV 데이터 형식
 
 ### 단일 타깃 예시
 
@@ -225,12 +309,12 @@ prophet-gp suggest --data data/sample/sample_data.csv --config configs/sample_em
 
 ---
 
-## 7) config 설정 가이드 (초등학생도 이해 가능 버전)
+## 8) config 설정 가이드 (초등학생도 이해 가능 버전)
 
 config는 "게임 옵션 창" 같은 것입니다.  
 무엇을 입력으로 보고, 어떤 목표로 추천할지 정합니다.
 
-### 전체 예시 (`configs/sample_emission.yaml`)
+### 전체 예시 (일러스트 — 저장소 실제 파일은 `configs/test.yaml`, `configs/default.yaml` 등을 참고)
 
 ```yaml
 data:
@@ -320,7 +404,7 @@ optimization:
 
 ---
 
-## 8) 용어 사전 (아주 쉬운 말)
+## 9) 용어 사전 (아주 쉬운 말)
 
 - **SMILES**: 분자를 글자로 적는 방법
 - **featuriser**: 글자/구조를 숫자 벡터로 바꾸는 도구
@@ -334,7 +418,7 @@ optimization:
 
 ---
 
-## 9) 출력 결과 읽는 방법
+## 10) 출력 결과 읽는 방법
 
 `suggest` 결과의 주요 필드:
 
@@ -348,7 +432,7 @@ optimization:
 
 ---
 
-## 10) 자주 만나는 질문
+## 11) 자주 만나는 질문
 
 ### Q1. 이름/CAS를 넣었는데 실패해요.
 - 인터넷/PubChem 조회 실패, 오타, 특수한 명명 문제일 수 있습니다.
@@ -364,12 +448,13 @@ optimization:
 
 ---
 
-## 11) 프로젝트 구조
+## 12) 프로젝트 구조
 
 ```text
 configs/                  # 설정 파일
 data/
   raw/                    # 원본/누적 데이터셋
+  sample/                 # 샘플 CSV
   processed/              # 전처리 결과 캐시
 notebooks/                # 사용 예시 노트북
 scripts/                  # 실행 유틸
@@ -380,6 +465,9 @@ src/prophet_gp/
   models/                 # GP surrogate
   optimization/           # BO 로직
   pipeline/               # 전체 오케스트레이션
+  web/                    # 브라우저 UI (FastAPI + static/index.html)
+    static/
+      index.html
   cli.py                  # CLI 진입점
 tests/                    # 테스트
 ```

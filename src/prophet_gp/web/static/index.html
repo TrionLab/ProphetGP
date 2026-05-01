@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProphetGP 웹 콘솔</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7eef8;
+      --muted: #8fa3bf;
+      --accent: #5b9bd5;
+      --good: #6bcf7f;
+      --warn: #e6c35c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #162030 0%, var(--bg) 100%);
+    }
+    header h1 { margin: 0; font-size: 1.35rem; font-weight: 650; }
+    header p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    main { max-width: 1180px; margin: 0 auto; padding: 1.25rem 1.5rem 3rem; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+    }
+    section h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.55rem; }
+    label { color: var(--muted); font-size: 0.88rem; min-width: 7.5rem; }
+    input[type="text"], input[type="number"], select, textarea {
+      background: #121a26;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.45rem 0.55rem;
+      font-size: 0.9rem;
+      flex: 1;
+      min-width: 180px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.82rem;
+      resize: vertical;
+    }
+    button {
+      background: #264a73;
+      border: 1px solid #3b6ea5;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    button.secondary { background: #2a3344; border-color: var(--border); }
+    button.danger { background: #5c2d33; border-color: #8f4650; }
+    .pill {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      background: #243044;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .msg { font-size: 0.88rem; white-space: pre-wrap; margin-top: 0.35rem; color: var(--muted); }
+    .msg.err { color: #f0a4a4; }
+    .msg.ok { color: var(--good); }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; }
+    .candidate {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem;
+      background: #141c28;
+    }
+    .candidate h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.35rem 0.75rem;
+      font-size: 0.85rem;
+      margin-bottom: 0.65rem;
+    }
+    .metrics div span { color: var(--muted); display: block; font-size: 0.75rem; }
+    table.kv { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.5rem; }
+    table.kv th, table.kv td {
+      border-bottom: 1px solid var(--border);
+      padding: 0.35rem 0.25rem;
+      vertical-align: top;
+      text-align: left;
+    }
+    table.kv th { color: var(--muted); font-weight: 500; width: 38%; }
+    .chart-wrap { position: relative; height: 220px; margin-top: 0.35rem; }
+    .featuriser-list {
+      max-height: 140px;
+      overflow: auto;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.35rem;
+      padding: 0.35rem;
+      background: #121a26;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    code { font-family: ui-monospace, Consolas, monospace; font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ProphetGP 웹 콘솔</h1>
+    <p>
+      노트북(<code>prophetgp_quickstart.ipynb</code>)과 동일한 흐름: 설정 편집 → 학습 → 후보 추천 → (선택) 데이터 병합.
+      <strong>file://</strong>로 HTML만 열면 API가 동작하지 않습니다. 아래 서버를 실행한 뒤 이 주소로 접속하세요:
+      <code id="originHint"></code>
+    </p>
+  </header>
+  <main>
+    <section id="sec-config">
+      <h2>설정 (configs/*.yaml)</h2>
+      <div class="row">
+        <label for="cfgSelect">파일</label>
+        <select id="cfgSelect"></select>
+        <button type="button" id="btnCfgReload" class="secondary">불러오기</button>
+        <button type="button" id="btnCfgSave">디스크에 저장</button>
+        <span id="cfgStatus" class="pill">대기</span>
+      </div>
+      <textarea id="cfgYaml" spellcheck="false"></textarea>
+      <p id="cfgMsg" class="msg"></p>
+    </section>
+
+    <section id="sec-extra">
+      <h2>Featuriser 목록</h2>
+      <div class="row">
+        <button type="button" id="btnFeaturisers" class="secondary">사용 가능한 featuriser 조회</button>
+      </div>
+      <div id="featuriserBox" class="featuriser-list" hidden></div>
+      <p id="featMsg" class="msg"></p>
+    </section>
+
+    <section id="sec-train">
+      <h2>학습</h2>
+      <div class="row">
+        <label for="dataPath">CSV 경로</label>
+        <input type="text" id="dataPath" value="data/sample/sample_data_without_target.csv" />
+      </div>
+      <div class="row">
+        <button type="button" id="btnTrain">학습 실행</button>
+        <span id="trainPill" class="pill">세션 없음</span>
+      </div>
+      <p id="trainMsg" class="msg"></p>
+    </section>
+
+    <section id="sec-suggest">
+      <h2>다음 실험 후보 (suggest_next_experiments)</h2>
+      <div class="row">
+        <label for="nCand">n_candidates</label>
+        <input type="number" id="nCand" min="1" value="3" />
+        <label for="strategy">strategy</label>
+        <select id="strategy">
+          <option value="best_output">best_output</option>
+          <option value="best_information">best_information</option>
+        </select>
+        <button type="button" id="btnSuggest">추천 실행</button>
+      </div>
+      <p id="suggestMsg" class="msg"></p>
+      <div id="suggestCharts" class="grid-2"></div>
+    </section>
+
+    <section id="sec-append">
+      <h2>신규 배치 병합 (선택)</h2>
+      <div class="row">
+        <label for="baseCsv">기준 CSV</label>
+        <input type="text" id="baseCsv" value="data/sample/sample_data_without_target.csv" />
+      </div>
+      <div class="row">
+        <label for="newCsv">신규 CSV</label>
+        <input type="text" id="newCsv" value="data/raw/new_batch.csv" />
+      </div>
+      <div class="row">
+        <label for="outCsv">저장 경로</label>
+        <input type="text" id="outCsv" value="data/raw/reactions_merged.csv" />
+      </div>
+      <div class="row">
+        <button type="button" id="btnAppend" class="secondary">병합 실행</button>
+      </div>
+      <p id="appendMsg" class="msg"></p>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const apiBase = "";
+    document.getElementById("originHint").textContent =
+      typeof location !== "undefined" ? location.origin + "/" : "http://127.0.0.1:8765/";
+
+    let sessionId = null;
+    let chartInstances = [];
+
+    function setMsg(el, text, kind) {
+      el.textContent = text || "";
+      el.classList.remove("err", "ok");
+      if (kind === "err") el.classList.add("err");
+      if (kind === "ok") el.classList.add("ok");
+    }
+
+    async function apiJson(url, opts) {
+      const res = await fetch(url, opts);
+      const ct = res.headers.get("content-type") || "";
+      const body = ct.includes("application/json") ? await res.json() : await res.text();
+      if (!res.ok) {
+        const detail = typeof body === "object" && body.detail !== undefined ? JSON.stringify(body.detail) : String(body);
+        throw new Error(detail || res.statusText);
+      }
+      return body;
+    }
+
+    async function refreshConfigList() {
+      const data = await apiJson(apiBase + "/api/configs");
+      const sel = $("cfgSelect");
+      sel.innerHTML = "";
+      for (const f of data.files) {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = f;
+        sel.appendChild(opt);
+      }
+      if (data.files.length === 0) {
+        setMsg($("cfgMsg"), "configs 폴더에 yaml 파일이 없습니다.", "err");
+      }
+    }
+
+    async function loadSelectedConfig() {
+      const name = $("cfgSelect").value;
+      if (!name) return;
+      const data = await apiJson(apiBase + "/api/config/" + encodeURIComponent(name));
+      $("cfgYaml").value = data.text;
+      $("cfgStatus").textContent = "불러옴: " + data.name;
+      setMsg($("cfgMsg"), "");
+    }
+
+    async function saveConfig() {
+      const name = $("cfgSelect").value;
+      if (!name) return;
+      const text = $("cfgYaml").value;
+      const res = await fetch(apiBase + "/api/config/" + encodeURIComponent(name), {
+        method: "PUT",
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        body: text,
+      });
+      const bodyText = await res.text();
+      if (!res.ok) {
+        let detail = bodyText;
+        try {
+          detail = JSON.parse(bodyText).detail || detail;
+        } catch (_) {}
+        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      }
+      $("cfgStatus").textContent = "저장됨";
+      setMsg($("cfgMsg"), "저장 완료.", "ok");
+    }
+
+    function destroyCharts() {
+      chartInstances.forEach((c) => c.destroy());
+      chartInstances = [];
+      $("suggestCharts").innerHTML = "";
+    }
+
+    function isPlainObject(v) {
+      return v && typeof v === "object" && !Array.isArray(v);
+    }
+
+    /** 숫자는 항상 소수점 3자리로 표시 (출력 영역 공통). */
+    function formatVal(v) {
+      if (v === null || v === undefined) return "—";
+      if (typeof v === "number") return Number.isFinite(v) ? v.toFixed(3) : String(v);
+      if (typeof v === "boolean") return String(v);
+      if (typeof v === "string") return v;
+      if (Array.isArray(v)) return v.map(formatVal).join(", ");
+      if (isPlainObject(v)) {
+        const keys = Object.keys(v).sort();
+        return "{ " + keys.map((k) => k + ": " + formatVal(v[k])).join(", ") + " }";
+      }
+      return String(v);
+    }
+
+    function fmtMsgNum(v) {
+      return typeof v === "number" && Number.isFinite(v) ? v.toFixed(3) : String(v);
+    }
+
+    const META_KEYS = new Set([
+      "predicted_target_mean",
+      "predicted_target_std",
+      "target_gap",
+      "objective_score",
+      "information_score",
+      "total_score",
+      "ranking_strategy",
+      "mapped_reactants_input",
+      "mapped_reactants_smiles",
+      "nearest_known_reactants_input",
+      "nearest_known_reactants_smiles",
+      "nearest_reactant_distance",
+    ]);
+
+    function renderCandidateCard(idx, row) {
+      const card = document.createElement("div");
+      card.className = "candidate";
+      const mean = row.predicted_target_mean || {};
+      const std = row.predicted_target_std || {};
+      const targets = Object.keys(mean);
+      const h = document.createElement("h3");
+      h.textContent = "후보 #" + (idx + 1);
+      card.appendChild(h);
+
+      const metrics = document.createElement("div");
+      metrics.className = "metrics";
+      function addMetric(label, val) {
+        const d = document.createElement("div");
+        d.innerHTML = "<span>" + label + "</span><strong>" + formatVal(val) + "</strong>";
+        metrics.appendChild(d);
+      }
+      addMetric("objective_score", row.objective_score);
+      addMetric("information_score", row.information_score);
+      addMetric("total_score", row.total_score);
+      addMetric("mapped_reactants_input", row.mapped_reactants_input);
+      card.appendChild(metrics);
+
+      const tbl = document.createElement("table");
+      tbl.className = "kv";
+      const thead = document.createElement("thead");
+      thead.innerHTML = "<tr><th>타깃</th><th>예측 평균</th><th>예측 표준편차</th><th>target_gap</th></tr>";
+      tbl.appendChild(thead);
+      const tb = document.createElement("tbody");
+      for (const t of targets) {
+        const tr = document.createElement("tr");
+        const gap = row.target_gap ? row.target_gap[t] : null;
+        tr.innerHTML =
+          "<th>" +
+          t +
+          "</th><td><code>" +
+          formatVal(mean[t]) +
+          "</code></td><td><code>" +
+          formatVal(std[t]) +
+          "</code></td><td><code>" +
+          formatVal(gap) +
+          "</code></td>";
+        tb.appendChild(tr);
+      }
+      tbl.appendChild(tb);
+      card.appendChild(tbl);
+
+      const chartOuter = document.createElement("div");
+      chartOuter.className = "chart-wrap";
+      const canvas = document.createElement("canvas");
+      canvas.id = "chart-" + idx;
+      chartOuter.appendChild(canvas);
+      card.appendChild(chartOuter);
+
+      const extraTbl = document.createElement("table");
+      extraTbl.className = "kv";
+      const extraBody = document.createElement("tbody");
+      const keys = Object.keys(row).filter((k) => !META_KEYS.has(k));
+      keys.sort();
+      for (const k of keys) {
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.textContent = k;
+        const td = document.createElement("td");
+        td.innerHTML = "<code>" + formatVal(row[k]) + "</code>";
+        tr.appendChild(th);
+        tr.appendChild(td);
+        extraBody.appendChild(tr);
+      }
+      if (keys.length) {
+        const cap = document.createElement("div");
+        cap.style.marginTop = "0.65rem";
+        cap.style.fontSize = "0.82rem";
+        cap.style.color = "var(--muted)";
+        cap.textContent = "그 외 입력 · 부가 필드";
+        card.appendChild(cap);
+        extraTbl.appendChild(extraBody);
+        card.appendChild(extraTbl);
+      }
+
+      $("suggestCharts").appendChild(card);
+
+      const ctx = canvas.getContext("2d");
+      const labels = targets;
+      const means = labels.map((t) => Number(mean[t]));
+      const errs = labels.map((t) => Math.max(0, Number(std[t] || 0)));
+      const inst = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "predicted_target_mean",
+              data: means,
+              backgroundColor: "rgba(91, 155, 213, 0.55)",
+              borderColor: "rgba(91, 155, 213, 1)",
+              borderWidth: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: "#cfd9ea" } },
+            title: {
+              display: true,
+              text: "타깃별 예측 평균 (막대) · 표준편차는 툴팁",
+              color: "#a9bcd6",
+              font: { size: 12 },
+            },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const raw = ctx.parsed.y;
+                  const y =
+                    typeof raw === "number" && Number.isFinite(raw) ? raw.toFixed(3) : String(raw);
+                  return (ctx.dataset.label || "") + ": " + y;
+                },
+                afterBody(items) {
+                  const i = items[0].dataIndex;
+                  const t = labels[i];
+                  return [
+                    "std: " + formatVal(errs[i]),
+                    "gap: " + formatVal(row.target_gap ? row.target_gap[t] : null),
+                  ];
+                },
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: "#9eb3d0" }, grid: { color: "rgba(255,255,255,0.06)" } },
+            y: {
+              ticks: {
+                color: "#9eb3d0",
+                callback(v) {
+                  return typeof v === "number" && Number.isFinite(v) ? v.toFixed(3) : v;
+                },
+              },
+              grid: { color: "rgba(255,255,255,0.06)" },
+            },
+          },
+        },
+      });
+      chartInstances.push(inst);
+    }
+
+    async function runTrain() {
+      const name = $("cfgSelect").value;
+      const dataPath = $("dataPath").value.trim();
+      setMsg($("trainMsg"), "학습 중…");
+      const data = await apiJson(apiBase + "/api/train", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config_name: name, data_path: dataPath }),
+      });
+      sessionId = data.session_id;
+      $("trainPill").textContent =
+        "세션: " +
+        sessionId.slice(0, 8) +
+        "… · 행 " +
+        fmtMsgNum(data.train_rows) +
+        " · 특성 " +
+        fmtMsgNum(data.feature_dims);
+      setMsg(
+        $("trainMsg"),
+        "타깃 컬럼: " +
+          JSON.stringify(data.target_columns) +
+          " · 분자 표현 고유 행(근사): " +
+          fmtMsgNum(data.molecular_unique_rows),
+        "ok"
+      );
+    }
+
+    async function runSuggest() {
+      if (!sessionId) {
+        setMsg($("suggestMsg"), "먼저 학습을 실행하세요.", "err");
+        return;
+      }
+      destroyCharts();
+      setMsg($("suggestMsg"), "추천 계산 중…");
+      const body = {
+        session_id: sessionId,
+        n_candidates: Number($("nCand").value || 3),
+        strategy: $("strategy").value,
+      };
+      const data = await apiJson(apiBase + "/api/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const list = data.candidates || [];
+      list.forEach((row, i) => renderCandidateCard(i, row));
+      const shapeFmt = Array.isArray(data.raw_candidates_shape)
+        ? "[" + data.raw_candidates_shape.map((n) => fmtMsgNum(Number(n))).join(", ") + "]"
+        : JSON.stringify(data.raw_candidates_shape);
+      setMsg(
+        $("suggestMsg"),
+        "전략: " +
+          data.strategy +
+          " · 후보 수: " +
+          fmtMsgNum(list.length) +
+          " · raw shape " +
+          shapeFmt,
+        "ok"
+      );
+    }
+
+    async function runAppend() {
+      const name = $("cfgSelect").value;
+      const payload = {
+        config_name: name,
+        base_data_path: $("baseCsv").value.trim(),
+        new_data_path: $("newCsv").value.trim(),
+        out_path: $("outCsv").value.trim(),
+      };
+      setMsg($("appendMsg"), "병합 중…");
+      const data = await apiJson(apiBase + "/api/append", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setMsg($("appendMsg"), "행 수 " + fmtMsgNum(data.rows) + " · 저장: " + data.output, "ok");
+    }
+
+    async function runFeaturisers() {
+      setMsg($("featMsg"), "조회 중…");
+      const data = await apiJson(apiBase + "/api/featurisers");
+      const box = $("featuriserBox");
+      box.hidden = false;
+      box.textContent = data.featurisers.join(", ");
+      setMsg($("featMsg"), "총 " + fmtMsgNum(data.featurisers.length) + "개", "ok");
+    }
+
+    $("btnCfgReload").addEventListener("click", () =>
+      loadSelectedConfig().catch((e) => setMsg($("cfgMsg"), String(e.message || e), "err"))
+    );
+    $("btnCfgSave").addEventListener("click", () =>
+      saveConfig().catch((e) => setMsg($("cfgMsg"), String(e.message || e), "err"))
+    );
+    $("cfgSelect").addEventListener("change", () =>
+      loadSelectedConfig().catch((e) => setMsg($("cfgMsg"), String(e.message || e), "err"))
+    );
+
+    $("btnTrain").addEventListener("click", () =>
+      runTrain().catch((e) => setMsg($("trainMsg"), String(e.message || e), "err"))
+    );
+    $("btnSuggest").addEventListener("click", () =>
+      runSuggest().catch((e) => setMsg($("suggestMsg"), String(e.message || e), "err"))
+    );
+    $("btnAppend").addEventListener("click", () =>
+      runAppend().catch((e) => setMsg($("appendMsg"), String(e.message || e), "err"))
+    );
+    $("btnFeaturisers").addEventListener("click", () =>
+      runFeaturisers().catch((e) => setMsg($("featMsg"), String(e.message || e), "err"))
+    );
+
+    refreshConfigList()
+      .then(() => loadSelectedConfig())
+      .catch((e) => setMsg($("cfgMsg"), String(e.message || e), "err"));
+  </script>
+</body>
+</html>

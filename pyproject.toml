@@ -30,15 +30,23 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.8",
 ]
+web = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+]
 
 [project.scripts]
 prophet-gp = "prophet_gp.cli:main"
+prophet-gp-web = "prophet_gp.web.app:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+prophet_gp.web = ["static/*.html"]
 
 [tool.ruff]
 line-length = 100
