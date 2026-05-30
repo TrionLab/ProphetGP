@@ -9,6 +9,8 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs, Descriptors
 
+from prophet_gp.features.topo_physchem import topo_physchem_featuriser
+
 
 def _ecfp_featuriser(smiles_list: Iterable[str], n_bits: int = 2048, radius: int = 2) -> np.ndarray:
     rows = []
@@ -22,7 +24,7 @@ def _ecfp_featuriser(smiles_list: Iterable[str], n_bits: int = 2048, radius: int
 
 
 def _morgan_fp_featuriser(
-    smiles_list: Iterable[str], radius: int = 1, n_bits: int = 2048
+    smiles_list: Iterable[str], radius: int = 2, n_bits: int = 1024
 ) -> np.ndarray:
     """Morgan (ECFP-style) binary fingerprint with chirality flags.
 
@@ -71,6 +73,7 @@ class GaucheFeaturizerRegistry:
             "ecfp_fingerprints": _ecfp_featuriser,
             "morgan_fp": _morgan_fp_featuriser,
             "rdkit_descriptors": _rdkit_desc_featuriser,
+            "topo_physchem": topo_physchem_featuriser,
         }
         self._gauche_dynamic: Dict[str, Callable[[Iterable[str]], np.ndarray]] = self._load_gauche_featurisers()
 

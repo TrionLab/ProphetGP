@@ -16,7 +16,7 @@ data:
 
 featurization:
   featuriser: ecfp_fingerprints
-  # available: "auto" 또는 gauche에서 조회되는 featuriser 이름
+  # available: "auto", topo_physchem, morgan_fp, rdkit_descriptors, 또는 gauche featuriser 이름
   combine_strategy: concat
 
 optimization:

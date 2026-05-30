@@ -18,7 +18,7 @@ data:
     Temperature: continuous
 
 featurization:
-  featuriser: morgan_fp
+  featuriser: topo_physchem
   combine_strategy: concat
 
 optimization:
@@ -31,10 +31,10 @@ optimization:
     Emission Peak:
       objective: target
       target_value: 490.0
-      weight: 1.0
+      weight: 2.0
     FWHM:
       objective: minimize
-      weight: 0.8
+      weight: 1.0
   n_restarts: 10
   raw_samples: 128
   target_search_size: 5000
