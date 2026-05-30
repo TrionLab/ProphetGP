@@ -10,12 +10,21 @@ data:
     - "1,8-Diaminonaphthalene"
     - "2,3-Diaminonaphthalene"
     - "2,6-Diaminonaphthalene"
+    - "1,2-Diaminonaphthalene"
+    - "1,3-Diaminonaphthalene"
+    - "1,4-Diaminonaphthalene"
+    - "1,6-Diaminonaphthalene"
+    - "1,7-Diaminonaphthalene"
+    - "2,7-Diaminonaphthalene"
   condition_ranges:
     Temperature:
       min: 0
       max: 600
   ignore_columns:
     - PLQY
+    - Pristine Emission
+    - Pristine FWHM
+    - Pristine PLQY
   explicit_condition_types:
     Temperature: continuous
 

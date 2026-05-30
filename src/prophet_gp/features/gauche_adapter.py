@@ -22,7 +22,7 @@ def _ecfp_featuriser(smiles_list: Iterable[str], n_bits: int = 2048, radius: int
 
 
 def _morgan_fp_featuriser(
-    smiles_list: Iterable[str], radius: int = 2, n_bits: int = 2048
+    smiles_list: Iterable[str], radius: int = 1, n_bits: int = 1024
 ) -> np.ndarray:
     """Morgan (ECFP-style) binary fingerprint with chirality flags.
 

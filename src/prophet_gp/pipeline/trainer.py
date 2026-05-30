@@ -101,6 +101,8 @@ class ProphetGPPipeline:
 
     def train_from_csv(self, data_path: str) -> TrainingArtifacts:
         prepared = self.dataset_service.load_csv(data_path)
+        prepared = self.dataset_service.drop_na_training_rows(prepared)
+        # print("Dropped NA rows:", prepared.frame)
         artifacts = self.prepare_features(prepared)
         self.surrogate.fit(artifacts.x_train, artifacts.y_train)
         return artifacts

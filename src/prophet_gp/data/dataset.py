@@ -102,3 +102,23 @@ class ReactionDatasetService:
             condition_types=inferred,
         )
         return PreparedDataset(frame=df, resolved_smiles=resolved, schema=schema, y=df[target_cols])
+
+    def drop_na_training_rows(self, prepared: PreparedDataset) -> PreparedDataset:
+        """반응물·타깃·조건 열 중 하나라도 NA인 행을 제거한다."""
+        cols = [
+            prepared.schema.reactant_column,
+            *prepared.schema.target_columns,
+            *prepared.schema.condition_columns,
+        ]
+        mask = prepared.frame[cols].notna().all(axis=1)
+        if bool(mask.all()):
+            return prepared
+        frame = prepared.frame.loc[mask].reset_index(drop=True)
+        resolved = [prepared.resolved_smiles[i] for i, m in enumerate(mask) if m]
+        y = prepared.y.loc[mask].reset_index(drop=True)
+        return PreparedDataset(
+            frame=frame,
+            resolved_smiles=resolved,
+            schema=prepared.schema,
+            y=y,
+        )
