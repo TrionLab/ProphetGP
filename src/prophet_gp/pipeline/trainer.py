@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
+import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
@@ -39,6 +40,12 @@ class TrainingArtifacts:
 class SuggestionResult:
     raw_candidates: np.ndarray
     decoded_candidates: List[Dict[str, Any]]
+
+
+@dataclass
+class PredictionResult:
+    raw_features: np.ndarray
+    predictions: List[Dict[str, Any]]
 
 
 class ProphetGPPipeline:
@@ -139,6 +146,131 @@ class ProphetGPPipeline:
             raw_candidates = cand_pre_gp
         decoded = self._decode_candidates(raw_candidates, artifacts, chosen_strategy)
         return SuggestionResult(raw_candidates=raw_candidates, decoded_candidates=decoded)
+
+    def predict_targets(
+        self,
+        artifacts: TrainingArtifacts,
+        inputs: Union[Dict[str, Any], List[Dict[str, Any]]],
+    ) -> PredictionResult:
+        """지정한 반응물·조건 입력에 대해 학습된 GP의 posterior mean/std를 반환한다."""
+        if self.surrogate.model is None:
+            raise RuntimeError("GP model is not fitted. Call train_from_csv first.")
+        rows = [inputs] if isinstance(inputs, dict) else list(inputs)
+        if not rows:
+            raise ValueError("At least one input row is required.")
+        x_gp, meta_rows = self._encode_query_inputs(artifacts, rows)
+        pred_mean, pred_var = self.surrogate.predict(np.asarray(x_gp, dtype=np.float64))
+        predictions: List[Dict[str, Any]] = []
+        for i, meta in enumerate(meta_rows):
+            stats = self._target_prediction_stats(pred_mean[i], pred_var[i], artifacts)
+            predictions.append({**meta, **stats})
+        return PredictionResult(raw_features=x_gp, predictions=predictions)
+
+    def _encode_query_inputs(
+        self,
+        artifacts: TrainingArtifacts,
+        inputs: List[Dict[str, Any]],
+    ) -> tuple[np.ndarray, List[Dict[str, Any]]]:
+        react_col = self.config.data.reactant_column
+        delim = self.config.data.reactant_delimiter
+        feature_rows: List[np.ndarray] = []
+        meta_rows: List[Dict[str, Any]] = []
+
+        for inp in inputs:
+            raw_reactants = inp.get("reactants", inp.get(react_col))
+            if raw_reactants is None:
+                raise ValueError(
+                    f"Each input must include 'reactants' or '{react_col}'."
+                )
+            if isinstance(raw_reactants, list):
+                tokens = [str(t).strip() for t in raw_reactants if str(t).strip()]
+                raw_str = delim.join(tokens)
+            else:
+                raw_str = str(raw_reactants).strip()
+                tokens = [x.strip() for x in raw_str.split(delim) if x.strip()]
+            if not tokens:
+                raise ValueError("At least one reactant token is required.")
+
+            smiles_list = [
+                self.dataset_service.resolver.to_canonical_smiles(tok) for tok in tokens
+            ]
+            per_molecule = self.featurizers.featurize(
+                smiles_list, name=self.config.featurization.featuriser
+            )
+            mol_vec = per_molecule.mean(axis=0)
+
+            cond_values: Dict[str, Any] = {}
+            nested = inp.get("conditions")
+            if isinstance(nested, dict):
+                cond_values.update(nested)
+            for col in artifacts.condition_columns:
+                if col in inp:
+                    cond_values[col] = inp[col]
+
+            missing = [c for c in artifacts.condition_columns if c not in cond_values]
+            if missing:
+                raise ValueError(f"Missing condition values for: {missing}")
+
+            if artifacts.condition_columns:
+                if artifacts.condition_transformer is None:
+                    raise RuntimeError("condition_transformer is missing on artifacts.")
+                cond_df = pd.DataFrame(
+                    [{col: cond_values[col] for col in artifacts.condition_columns}]
+                )
+                x_cond = artifacts.condition_transformer.transform(cond_df)
+                if hasattr(x_cond, "toarray"):
+                    x_cond = x_cond.toarray()
+                x_row = np.concatenate(
+                    [mol_vec, np.asarray(x_cond, dtype=np.float32).reshape(-1)],
+                    axis=0,
+                )
+            else:
+                x_row = mol_vec
+
+            feature_rows.append(np.asarray(x_row, dtype=np.float32))
+            meta_rows.append(
+                {
+                    "reactants_input": raw_str,
+                    "reactants_smiles": smiles_list,
+                    "conditions": cond_values,
+                }
+            )
+
+        x_pre_gp = np.vstack(feature_rows)
+        if artifacts.gp_input_scaler is not None:
+            x_gp = artifacts.gp_input_scaler.transform(
+                np.asarray(x_pre_gp, dtype=np.float64)
+            ).astype(np.float32)
+        else:
+            x_gp = x_pre_gp
+        return x_gp, meta_rows
+
+    def _target_prediction_stats(
+        self,
+        mean_row: np.ndarray,
+        var_row: np.ndarray,
+        artifacts: TrainingArtifacts,
+    ) -> Dict[str, Any]:
+        objective_map = self._build_target_objective_map(artifacts)
+        target_predictions = {
+            t: float(mean_row[t_idx]) for t_idx, t in enumerate(artifacts.target_columns)
+        }
+        target_uncertainty = {
+            t: float(np.sqrt(max(float(var_row[t_idx]), 0.0)))
+            for t_idx, t in enumerate(artifacts.target_columns)
+        }
+        target_gap: Dict[str, Optional[float]] = {}
+        for t in artifacts.target_columns:
+            t_cfg = objective_map.get(t, {})
+            t_target = t_cfg.get("target_value")
+            target_gap[t] = (
+                abs(target_predictions[t] - float(t_target)) if t_target is not None else None
+            )
+        return {
+            "predicted_target_mean": target_predictions,
+            "predicted_target_std": target_uncertainty,
+            "target_gap": target_gap,
+        }
 
     def _apply_input_constraints(
         self, raw_candidates: np.ndarray, artifacts: TrainingArtifacts
@@ -271,22 +403,10 @@ class ProphetGPPipeline:
                 nearest_idx = int(np.argmin(distances))
                 nearest_input = artifacts.reactant_inputs[nearest_idx]
                 nearest_smiles = artifacts.reactant_smiles[nearest_idx]
-            means = pred_mean[i]
-            variances = pred_var[i]
-            target_predictions = {
-                t: float(means[t_idx]) for t_idx, t in enumerate(artifacts.target_columns)
-            }
-            target_uncertainty = {
-                t: float(np.sqrt(max(float(variances[t_idx]), 0.0)))
-                for t_idx, t in enumerate(artifacts.target_columns)
-            }
-            target_gap: Dict[str, Optional[float]] = {}
-            for t in artifacts.target_columns:
-                t_cfg = objective_map.get(t, {})
-                t_target = t_cfg.get("target_value")
-                target_gap[t] = (
-                    abs(target_predictions[t] - float(t_target)) if t_target is not None else None
-                )
+            stats = self._target_prediction_stats(pred_mean[i], pred_var[i], artifacts)
+            target_predictions = stats["predicted_target_mean"]
+            target_uncertainty = stats["predicted_target_std"]
+            target_gap = stats["target_gap"]
 
             objective_score = 0.0
             information_score = 0.0
