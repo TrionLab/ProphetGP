@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, List
 
 import requests
 from rdkit import Chem
 from rdkit import RDLogger
+
+from prophet_gp.chem.pubchem_cache import PubChemCache, default_pubchem_cache_dir
 
 _RD_LOGGER = RDLogger.logger()
 _RD_LOGGER.setLevel(RDLogger.CRITICAL)
@@ -26,6 +29,16 @@ class MoleculeRecord:
 
 class MoleculeResolver:
     PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound"
+
+    def __init__(
+        self,
+        *,
+        use_cache: bool = True,
+        cache_dir: Path | None = None,
+    ) -> None:
+        self._pubchem_cache: PubChemCache | None = None
+        if use_cache:
+            self._pubchem_cache = PubChemCache(cache_dir or default_pubchem_cache_dir())
 
     def to_canonical_smiles(self, value: str) -> str:
         token = value.strip()
@@ -60,6 +73,11 @@ class MoleculeResolver:
         return Chem.MolToSmiles(mol, canonical=True)
 
     def _resolve_with_pubchem(self, token: str, query_type: str = "name") -> str:
+        if self._pubchem_cache is not None:
+            cached = self._pubchem_cache.get(token, query_type)
+            if cached is not None:
+                return cached
+
         url = f"{self.PUBCHEM_BASE}/{query_type}/{token}/property/CanonicalSMILES/TXT"
         response = requests.get(url, timeout=15)
         if response.status_code != 200:
@@ -69,4 +87,7 @@ class MoleculeResolver:
         text = response.text.strip()
         if not text:
             raise MoleculeResolutionError(f"PubChem returned empty result for '{token}'.")
-        return text.splitlines()[0].strip()
+        canonical = text.splitlines()[0].strip()
+        if self._pubchem_cache is not None:
+            self._pubchem_cache.set(token, query_type, canonical)
+        return canonical

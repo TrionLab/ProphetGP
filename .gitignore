@@ -43,6 +43,9 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+
+# PubChem molecule resolution cache (populated at runtime)
+cache/
 nosetests.xml
 coverage.xml
 *.cover
