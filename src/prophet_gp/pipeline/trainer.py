@@ -137,10 +137,39 @@ class ProphetGPPipeline:
         return rows
 
     @staticmethod
-    def _query_input_key(inp: Dict[str, Any], condition_columns: List[str]) -> tuple:
+    def _normalize_condition_value(val: Any) -> Any:
+        if isinstance(val, (np.floating, float, int, np.integer)):
+            return float(val)
+        return val
+
+    @classmethod
+    def _query_input_key(cls, inp: Dict[str, Any], condition_columns: List[str]) -> tuple:
         reactants = str(inp.get("reactants", ""))
-        cond_key = tuple((col, inp[col]) for col in condition_columns if col in inp)
+        cond_key = tuple(
+            (col, cls._normalize_condition_value(inp[col]))
+            for col in condition_columns
+            if col in inp
+        )
         return (reactants, cond_key)
+
+    def _training_query_keys(self, artifacts: TrainingArtifacts) -> set[tuple]:
+        return {
+            self._query_input_key(inp, artifacts.condition_columns)
+            for inp in artifacts.training_query_inputs
+        }
+
+    def _exclude_training_combinations(
+        self,
+        artifacts: TrainingArtifacts,
+        query_inputs: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """학습 CSV에 이미 존재하는 (반응물, 조건) 조합을 suggestion 후보에서 제외한다."""
+        training_keys = self._training_query_keys(artifacts)
+        return [
+            inp
+            for inp in query_inputs
+            if self._query_input_key(inp, artifacts.condition_columns) not in training_keys
+        ]
 
     def _dedupe_query_inputs(
         self,
@@ -315,12 +344,19 @@ class ProphetGPPipeline:
         return [query_inputs[int(i)] for i in pick]
 
     def _build_discrete_query_inputs(self, artifacts: TrainingArtifacts) -> List[Dict[str, Any]]:
-        """condition_ranges 있음: config 그리드만. 없음: 학습 CSV 실험 조합만."""
+        """condition_ranges 있음: config 그리드(학습과 동일 조합 제외). 없음: 학습 CSV만."""
         if self._uses_config_condition_grid():
-            return self._dedupe_query_inputs(
-                self._build_grid_query_inputs(artifacts),
+            grid_inputs = self._exclude_training_combinations(
                 artifacts,
+                self._build_grid_query_inputs(artifacts),
             )
+            deduped = self._dedupe_query_inputs(grid_inputs, artifacts)
+            if not deduped:
+                raise ValueError(
+                    "No novel suggestion candidates remain after excluding training "
+                    "combinations. Widen condition_ranges or add reactant_allowed_values."
+                )
+            return deduped
         return self._dedupe_query_inputs(
             list(artifacts.training_query_inputs),
             artifacts,

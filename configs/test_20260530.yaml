@@ -5,7 +5,17 @@ data:
     - "Emission Peak"
     - "FWHM"
   reactant_delimiter: "|"
-  # reactant_allowed_values 생략 시 학습 CSV의 고유 Mol.1 값이 suggestion 범위가 됨
+  reactant_allowed_values:
+    - "1,5-Diaminonaphthalene"
+    - "1,8-Diaminonaphthalene"
+    - "2,3-Diaminonaphthalene"
+    - "2,6-Diaminonaphthalene"
+    - "1,2-Diaminonaphthalene"
+    - "1,3-Diaminonaphthalene"
+    - "1,4-Diaminonaphthalene"
+    - "1,6-Diaminonaphthalene"
+    - "1,7-Diaminonaphthalene"
+    - "2,7-Diaminonaphthalene"
   condition_ranges:
     Temperature:
       min: 0

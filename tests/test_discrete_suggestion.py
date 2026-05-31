@@ -51,6 +51,22 @@ def test_discrete_inputs_training_only_without_condition_ranges() -> None:
     assert rows == artifacts.training_query_inputs
 
 
+def test_grid_excludes_exact_training_combinations() -> None:
+    pipeline = ProphetGPPipeline.__new__(ProphetGPPipeline)
+    pipeline.config = AppConfig(
+        data=DataConfig(
+            condition_ranges={"Temperature": {"min": 100.0, "max": 300.0, "grid_points": 3}},
+        ),
+    )
+    artifacts = _artifacts_with_conditions()
+    rows = pipeline._build_discrete_query_inputs(artifacts)
+    keys = {pipeline._query_input_key(r, artifacts.condition_columns) for r in rows}
+    training_keys = pipeline._training_query_keys(artifacts)
+    assert keys.isdisjoint(training_keys)
+    assert ("A", (("Temperature", 100.0),)) not in keys
+    assert ("B", (("Temperature", 200.0),)) not in keys
+
+
 def test_build_discrete_query_inputs_cartesian() -> None:
     pipeline = ProphetGPPipeline.__new__(ProphetGPPipeline)
     pipeline.config = AppConfig(
@@ -62,10 +78,15 @@ def test_build_discrete_query_inputs_cartesian() -> None:
     )
     artifacts = _artifacts_with_conditions()
     rows = pipeline._build_discrete_query_inputs(artifacts)
-    assert len(rows) == 6  # 2 reactants * 3 grid temps (no extra training temps)
+    # 2 reactants * 3 grid temps(100,150,200) - 2 training combos (A@100, B@200) = 4
+    assert len(rows) == 4
     temps = {row["Temperature"] for row in rows}
     assert temps == {100.0, 150.0, 200.0}
-    assert 300.0 not in temps
+    assert not any(
+        pipeline._query_input_key(r, artifacts.condition_columns)
+        in pipeline._training_query_keys(artifacts)
+        for r in rows
+    )
 
 
 def test_score_candidate_pool_target_and_minimize() -> None:
