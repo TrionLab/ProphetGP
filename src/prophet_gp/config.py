@@ -42,7 +42,10 @@ class DataConfig(BaseModel):
     )
     condition_ranges: Dict[str, InputRangeConfig] = Field(
         default_factory=dict,
-        description="조건 컬럼별 입력 범위/허용값 제약.",
+        description=(
+            "조건 컬럼별 suggestion 그리드(min/max/grid_points 또는 allowed_values). "
+            "비어 있으면 suggestion은 학습 CSV에 등장한 조건값 조합만 사용한다."
+        ),
     )
     explicit_condition_types: Dict[str, ConditionType] = Field(default_factory=dict)
 

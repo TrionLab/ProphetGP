@@ -299,40 +299,30 @@ class ProphetGPPipeline:
             x_gp = x_pre_gp
         return x_gp, meta_rows
 
+    def _uses_config_condition_grid(self) -> bool:
+        return bool(self.config.data.condition_ranges)
+
     def _subsample_query_inputs(
         self,
         artifacts: TrainingArtifacts,
         query_inputs: List[Dict[str, Any]],
         max_pool: int,
     ) -> List[Dict[str, Any]]:
-        """학습에 사용된 실험 조합은 유지하고, 그리드 후보만 축소한다."""
-        training_keys = {
-            self._query_input_key(inp, artifacts.condition_columns)
-            for inp in artifacts.training_query_inputs
-        }
-        training_rows = [
-            inp
-            for inp in query_inputs
-            if self._query_input_key(inp, artifacts.condition_columns) in training_keys
-        ]
-        grid_rows = [
-            inp
-            for inp in query_inputs
-            if self._query_input_key(inp, artifacts.condition_columns) not in training_keys
-        ]
-        n_grid_keep = max(0, max_pool - len(training_rows))
-        if len(grid_rows) > n_grid_keep:
-            rng = np.random.default_rng(seed=42)
-            pick = rng.choice(len(grid_rows), size=n_grid_keep, replace=False)
-            grid_rows = [grid_rows[int(i)] for i in pick]
-        combined = training_rows + grid_rows
-        return self._dedupe_query_inputs(combined, artifacts)
+        if len(query_inputs) <= max_pool:
+            return query_inputs
+        rng = np.random.default_rng(seed=42)
+        pick = rng.choice(len(query_inputs), size=max_pool, replace=False)
+        return [query_inputs[int(i)] for i in pick]
 
     def _build_discrete_query_inputs(self, artifacts: TrainingArtifacts) -> List[Dict[str, Any]]:
-        """학습 실험 조합 + (반응물 scope × 조건 그리드) 유효 조합."""
-        grid_inputs = self._build_grid_query_inputs(artifacts)
+        """condition_ranges 있음: config 그리드만. 없음: 학습 CSV 실험 조합만."""
+        if self._uses_config_condition_grid():
+            return self._dedupe_query_inputs(
+                self._build_grid_query_inputs(artifacts),
+                artifacts,
+            )
         return self._dedupe_query_inputs(
-            list(artifacts.training_query_inputs) + grid_inputs,
+            list(artifacts.training_query_inputs),
             artifacts,
         )
 
@@ -364,36 +354,41 @@ class ProphetGPPipeline:
         cond_type = artifacts.condition_types.get(col, "continuous")
         train_vals = (artifacts.condition_train_values or {}).get(col, [])
 
-        if cfg is not None and cfg.allowed_values:
+        # condition_ranges에 컬럼이 없으면 학습 CSV 값만 사용한다.
+        if cfg is None:
+            if not train_vals:
+                raise ValueError(
+                    f"Condition '{col}' has no condition_ranges entry and no training values."
+                )
+            if cond_type == "categorical":
+                return list(dict.fromkeys(train_vals))
+            numeric_train = [
+                float(v) for v in train_vals if isinstance(v, (int, float, np.number))
+            ]
+            if not numeric_train:
+                raise ValueError(
+                    f"Condition '{col}' has no numeric training values for suggestion."
+                )
+            return sorted(set(numeric_train))
+
+        if cfg.allowed_values:
             return list(cfg.allowed_values)
 
         if cond_type == "categorical":
-            if train_vals:
-                return list(dict.fromkeys(train_vals))
-            raise ValueError(f"No allowed_values or training values for categorical condition: {col}")
+            raise ValueError(
+                f"condition_ranges.{col} requires allowed_values for categorical conditions."
+            )
 
-        grid_n = (
-            (cfg.grid_points if cfg is not None and cfg.grid_points is not None else None)
-            or self.config.optimization.condition_grid_points
-        )
-        lo = cfg.min if cfg is not None and cfg.min is not None else None
-        hi = cfg.max if cfg is not None and cfg.max is not None else None
-        if lo is None or hi is None:
-            numeric_train = [float(v) for v in train_vals if isinstance(v, (int, float, np.number))]
-            if numeric_train:
-                lo = min(numeric_train) if lo is None else lo
-                hi = max(numeric_train) if hi is None else hi
+        grid_n = cfg.grid_points or self.config.optimization.condition_grid_points
+        lo = cfg.min
+        hi = cfg.max
         if lo is None or hi is None:
             raise ValueError(
-                f"Condition '{col}' requires min/max in condition_ranges or numeric training values."
+                f"condition_ranges.{col} requires min and max for continuous/discrete conditions."
             )
-        grid_vals = (
-            [float(v) for v in np.linspace(float(lo), float(hi), int(grid_n))]
-            if grid_n >= 2
-            else [float(lo), float(hi)]
-        )
-        numeric_train = [float(v) for v in train_vals if isinstance(v, (int, float, np.number))]
-        return sorted(set(numeric_train + grid_vals))
+        if grid_n < 2:
+            return [float(lo), float(hi)]
+        return [float(v) for v in np.linspace(float(lo), float(hi), int(grid_n))]
 
     def _score_candidate_pool(
         self,

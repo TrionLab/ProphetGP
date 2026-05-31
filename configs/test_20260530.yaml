@@ -10,6 +10,7 @@ data:
     Temperature:
       min: 0
       max: 600
+      grid_points: 7
   ignore_columns:
     - PLQY
     - Pristine Emission
