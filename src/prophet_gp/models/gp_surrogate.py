@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from botorch.exceptions import ModelFittingError
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import ModelListGP, SingleTaskGP
 from gpytorch.mlls import ExactMarginalLogLikelihood, SumMarginalLogLikelihood
@@ -45,7 +46,14 @@ class GPSurrogate:
             ]
             model = ModelListGP(*models)
             mll = SumMarginalLogLikelihood(model.likelihood, model)
-        fit_gpytorch_mll(mll)
+        try:
+            fit_gpytorch_mll(mll, max_attempts=10)
+        except ModelFittingError as exc:
+            raise RuntimeError(
+                "GP model fitting failed. Set optimization.standardize_gp_inputs and "
+                "optimization.standardize_gp_targets to true in config (strongly "
+                "recommended for topo_physchem / high-dimensional inputs)."
+            ) from exc
         self.model = model
         self.train_x = train_x
         self.train_y = train_y
@@ -81,4 +89,5 @@ class GPSurrogate:
                 posterior = self.model.posterior(x_tensor)
                 mean_z = posterior.mean.squeeze(-1).cpu().numpy().reshape(-1, 1)
                 var_z = posterior.variance.squeeze(-1).cpu().numpy().reshape(-1, 1)
+        var_z = np.maximum(var_z, 1e-10)
         return self._inverse_scale_posterior(mean_z, var_z)

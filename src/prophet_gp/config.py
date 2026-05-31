@@ -13,6 +13,10 @@ class InputRangeConfig(BaseModel):
     min: Optional[float] = None
     max: Optional[float] = None
     allowed_values: Optional[List[Union[str, float, int]]] = None
+    grid_points: Optional[int] = Field(
+        default=None,
+        description="연속/이산 조건 suggestion 그리드 점 개수(컬럼별 override).",
+    )
 
 
 class TargetObjectiveConfig(BaseModel):
@@ -31,7 +35,10 @@ class DataConfig(BaseModel):
     )
     reactant_allowed_values: List[str] = Field(
         default_factory=list,
-        description="추천 시 허용할 반응물 입력값 목록. 비어 있으면 열린 범위로 동작.",
+        description=(
+            "추천 시 허용할 반응물 입력값 목록. "
+            "비어 있거나 YAML에서 생략하면 학습 CSV의 고유 반응물로 자동 설정된다."
+        ),
     )
     condition_ranges: Dict[str, InputRangeConfig] = Field(
         default_factory=dict,
@@ -64,6 +71,10 @@ class OptimizationConfig(BaseModel):
     n_restarts: int = 10
     raw_samples: int = 128
     target_search_size: int = 4096
+    condition_grid_points: int = Field(
+        default=25,
+        description="연속 조건 suggestion 시 min~max 균등 그리드 점 개수(컬럼별 grid_points 없을 때).",
+    )
     n_candidates: int = 5
 
 

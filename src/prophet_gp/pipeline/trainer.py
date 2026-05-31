@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import product
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -34,6 +35,10 @@ class TrainingArtifacts:
     gp_input_scaler: Optional[MinMaxScaler] = None
     # GP 표준화 전(분자+조건 결합) 특징; standardize_gp_inputs=True일 때만 설정.
     x_train_pre_gp_scale: Optional[np.ndarray] = None
+    condition_train_values: Optional[Dict[str, List[Any]]] = None
+    # config 미지정 시 학습 데이터 고유 반응물; 지정 시 config 값.
+    reactant_scope: List[str] = field(default_factory=list)
+    training_query_inputs: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -91,6 +96,12 @@ class ProphetGPPipeline:
 
         y = prepared.y.to_numpy(dtype=np.float32)
         feature_names = [f"x{i}" for i in range(x.shape[1])]
+        condition_train_values = {
+            col: prepared.frame[col].dropna().unique().tolist()
+            for col in prepared.schema.condition_columns
+        }
+        reactant_scope = self._resolve_reactant_scope(prepared)
+        training_query_inputs = self._build_training_query_inputs(prepared)
         return TrainingArtifacts(
             x_train=x,
             y_train=y,
@@ -104,7 +115,54 @@ class ProphetGPPipeline:
             condition_transformer=transformer if prepared.schema.condition_columns else None,
             gp_input_scaler=gp_scaler,
             x_train_pre_gp_scale=x_pre_gp if gp_scaler is not None else None,
+            condition_train_values=condition_train_values or None,
+            reactant_scope=reactant_scope,
+            training_query_inputs=training_query_inputs,
         )
+
+    def _build_training_query_inputs(self, prepared: PreparedDataset) -> List[Dict[str, Any]]:
+        react_col = prepared.schema.reactant_column
+        rows: List[Dict[str, Any]] = []
+        for _, frame_row in prepared.frame.iterrows():
+            inp: Dict[str, Any] = {"reactants": str(frame_row[react_col])}
+            for col in prepared.schema.condition_columns:
+                val = frame_row[col]
+                if pd.isna(val):
+                    continue
+                if isinstance(val, (np.floating, float, int, np.integer)):
+                    inp[col] = float(val)
+                else:
+                    inp[col] = val
+            rows.append(inp)
+        return rows
+
+    @staticmethod
+    def _query_input_key(inp: Dict[str, Any], condition_columns: List[str]) -> tuple:
+        reactants = str(inp.get("reactants", ""))
+        cond_key = tuple((col, inp[col]) for col in condition_columns if col in inp)
+        return (reactants, cond_key)
+
+    def _dedupe_query_inputs(
+        self,
+        inputs: List[Dict[str, Any]],
+        artifacts: TrainingArtifacts,
+    ) -> List[Dict[str, Any]]:
+        seen: set[tuple] = set()
+        deduped: List[Dict[str, Any]] = []
+        for inp in inputs:
+            key = self._query_input_key(inp, artifacts.condition_columns)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(inp)
+        return deduped
+
+    def _resolve_reactant_scope(self, prepared: PreparedDataset) -> List[str]:
+        explicit = self.config.data.reactant_allowed_values
+        if explicit:
+            return list(explicit)
+        react_col = prepared.schema.reactant_column
+        return sorted(set(prepared.frame[react_col].astype(str).tolist()))
 
     def train_from_csv(self, data_path: str) -> TrainingArtifacts:
         prepared = self.dataset_service.load_csv(data_path)
@@ -120,31 +178,27 @@ class ProphetGPPipeline:
         n_candidates: int,
         strategy: Optional[str] = None,
     ) -> SuggestionResult:
-        x = artifacts.x_train
-        bounds = np.vstack([x.min(axis=0), x.max(axis=0)])
         chosen_strategy = strategy or self.config.optimization.suggestion_strategy
-        raw_candidates_scaled = self.optimizer.suggest(
-            self.surrogate,
-            bounds=bounds,
-            n_candidates=n_candidates,
-            strategy=chosen_strategy,
-            target_objectives=self._build_target_objective_map(artifacts),
-            target_names=artifacts.target_columns,
+        if chosen_strategy not in {"best_output", "best_information"}:
+            raise ValueError("strategy must be 'best_output' or 'best_information'")
+
+        query_inputs = self._build_discrete_query_inputs(artifacts)
+        max_pool = self.config.optimization.target_search_size
+        if len(query_inputs) > max_pool:
+            query_inputs = self._subsample_query_inputs(artifacts, query_inputs, max_pool)
+
+        x_gp, meta_rows = self._encode_query_inputs(artifacts, query_inputs)
+        pred_mean, pred_var = self.surrogate.predict(np.asarray(x_gp, dtype=np.float64))
+        objective_map = self._build_target_objective_map(artifacts)
+        pool_scores = self._score_candidate_pool(
+            pred_mean, pred_var, artifacts, objective_map, chosen_strategy
         )
-        if artifacts.gp_input_scaler is not None:
-            cand_pre_gp = artifacts.gp_input_scaler.inverse_transform(
-                np.asarray(raw_candidates_scaled, dtype=np.float64)
-            ).astype(np.float32)
-        else:
-            cand_pre_gp = np.asarray(raw_candidates_scaled, dtype=np.float32).copy()
-        cand_pre_gp = self._apply_input_constraints(cand_pre_gp, artifacts)
-        if artifacts.gp_input_scaler is not None:
-            raw_candidates = artifacts.gp_input_scaler.transform(
-                np.asarray(cand_pre_gp, dtype=np.float64)
-            ).astype(np.float32)
-        else:
-            raw_candidates = cand_pre_gp
-        decoded = self._decode_candidates(raw_candidates, artifacts, chosen_strategy)
+        best_idx = np.argsort(-pool_scores)[:n_candidates]
+        raw_candidates = x_gp[best_idx]
+        selected_meta = [meta_rows[int(i)] for i in best_idx]
+        decoded = self._decode_candidates(
+            raw_candidates, artifacts, chosen_strategy, meta_rows=selected_meta
+        )
         return SuggestionResult(raw_candidates=raw_candidates, decoded_candidates=decoded)
 
     def predict_targets(
@@ -245,6 +299,133 @@ class ProphetGPPipeline:
             x_gp = x_pre_gp
         return x_gp, meta_rows
 
+    def _subsample_query_inputs(
+        self,
+        artifacts: TrainingArtifacts,
+        query_inputs: List[Dict[str, Any]],
+        max_pool: int,
+    ) -> List[Dict[str, Any]]:
+        """학습에 사용된 실험 조합은 유지하고, 그리드 후보만 축소한다."""
+        training_keys = {
+            self._query_input_key(inp, artifacts.condition_columns)
+            for inp in artifacts.training_query_inputs
+        }
+        training_rows = [
+            inp
+            for inp in query_inputs
+            if self._query_input_key(inp, artifacts.condition_columns) in training_keys
+        ]
+        grid_rows = [
+            inp
+            for inp in query_inputs
+            if self._query_input_key(inp, artifacts.condition_columns) not in training_keys
+        ]
+        n_grid_keep = max(0, max_pool - len(training_rows))
+        if len(grid_rows) > n_grid_keep:
+            rng = np.random.default_rng(seed=42)
+            pick = rng.choice(len(grid_rows), size=n_grid_keep, replace=False)
+            grid_rows = [grid_rows[int(i)] for i in pick]
+        combined = training_rows + grid_rows
+        return self._dedupe_query_inputs(combined, artifacts)
+
+    def _build_discrete_query_inputs(self, artifacts: TrainingArtifacts) -> List[Dict[str, Any]]:
+        """학습 실험 조합 + (반응물 scope × 조건 그리드) 유효 조합."""
+        grid_inputs = self._build_grid_query_inputs(artifacts)
+        return self._dedupe_query_inputs(
+            list(artifacts.training_query_inputs) + grid_inputs,
+            artifacts,
+        )
+
+    def _build_grid_query_inputs(self, artifacts: TrainingArtifacts) -> List[Dict[str, Any]]:
+        reactant_list = list(artifacts.reactant_scope)
+        if not reactant_list:
+            raise ValueError("No reactants available for discrete suggestion.")
+
+        condition_axes: List[List[Any]] = []
+        for col in artifacts.condition_columns:
+            condition_axes.append(self._condition_value_grid(col, artifacts))
+
+        query_inputs: List[Dict[str, Any]] = []
+        if not condition_axes:
+            for reactant in reactant_list:
+                query_inputs.append({"reactants": reactant})
+            return query_inputs
+
+        for reactant in reactant_list:
+            for cond_combo in product(*condition_axes):
+                row: Dict[str, Any] = {"reactants": reactant}
+                for col, value in zip(artifacts.condition_columns, cond_combo):
+                    row[col] = value
+                query_inputs.append(row)
+        return query_inputs
+
+    def _condition_value_grid(self, col: str, artifacts: TrainingArtifacts) -> List[Any]:
+        cfg = self.config.data.condition_ranges.get(col)
+        cond_type = artifacts.condition_types.get(col, "continuous")
+        train_vals = (artifacts.condition_train_values or {}).get(col, [])
+
+        if cfg is not None and cfg.allowed_values:
+            return list(cfg.allowed_values)
+
+        if cond_type == "categorical":
+            if train_vals:
+                return list(dict.fromkeys(train_vals))
+            raise ValueError(f"No allowed_values or training values for categorical condition: {col}")
+
+        grid_n = (
+            (cfg.grid_points if cfg is not None and cfg.grid_points is not None else None)
+            or self.config.optimization.condition_grid_points
+        )
+        lo = cfg.min if cfg is not None and cfg.min is not None else None
+        hi = cfg.max if cfg is not None and cfg.max is not None else None
+        if lo is None or hi is None:
+            numeric_train = [float(v) for v in train_vals if isinstance(v, (int, float, np.number))]
+            if numeric_train:
+                lo = min(numeric_train) if lo is None else lo
+                hi = max(numeric_train) if hi is None else hi
+        if lo is None or hi is None:
+            raise ValueError(
+                f"Condition '{col}' requires min/max in condition_ranges or numeric training values."
+            )
+        grid_vals = (
+            [float(v) for v in np.linspace(float(lo), float(hi), int(grid_n))]
+            if grid_n >= 2
+            else [float(lo), float(hi)]
+        )
+        numeric_train = [float(v) for v in train_vals if isinstance(v, (int, float, np.number))]
+        return sorted(set(numeric_train + grid_vals))
+
+    def _score_candidate_pool(
+        self,
+        pred_mean: np.ndarray,
+        pred_var: np.ndarray,
+        artifacts: TrainingArtifacts,
+        objective_map: Dict[str, Dict[str, Any]],
+        strategy: str,
+    ) -> np.ndarray:
+        scores = np.zeros(pred_mean.shape[0], dtype=np.float64)
+        for idx, target_name in enumerate(artifacts.target_columns):
+            obj_cfg = objective_map.get(target_name, {})
+            objective = obj_cfg.get("objective", self.config.optimization.objective)
+            target_value = obj_cfg.get("target_value", self.config.optimization.target_value)
+            weight = float(obj_cfg.get("weight", 1.0))
+            target_mean = pred_mean[:, idx]
+            target_std = np.sqrt(np.maximum(pred_var[:, idx], 0.0))
+            if strategy == "best_information":
+                scores += weight * target_std
+                continue
+            if objective == "maximize":
+                scores += weight * target_mean
+            elif objective == "minimize":
+                scores += -weight * target_mean
+            elif objective == "target":
+                if target_value is None:
+                    raise ValueError(f"target_value is required for target objective: {target_name}")
+                scores += -weight * np.abs(target_mean - float(target_value))
+            else:
+                raise ValueError(f"Unknown objective: {objective}")
+        return scores
+
     def _target_prediction_stats(
         self,
         mean_row: np.ndarray,
@@ -281,7 +462,7 @@ class ProphetGPPipeline:
         return adjusted
 
     def _apply_reactant_constraints(self, candidates: np.ndarray, artifacts: TrainingArtifacts) -> None:
-        allowed = self.config.data.reactant_allowed_values
+        allowed = artifacts.reactant_scope
         if not allowed:
             return
         allowed_vectors = []
@@ -370,9 +551,21 @@ class ProphetGPPipeline:
         raw_candidates: np.ndarray,
         artifacts: TrainingArtifacts,
         chosen_strategy: str,
+        meta_rows: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         decoded_rows: List[Dict[str, Any]] = []
         raw_f = np.asarray(raw_candidates, dtype=np.float64)
+        if meta_rows is not None:
+            # 유효 입력으로 재인코딩·재예측(선정 점수와 출력 일치).
+            x_gp, meta_rows = self._encode_query_inputs(
+                artifacts,
+                [
+                    {**{"reactants": m["reactants_input"]}, **m["conditions"]}
+                    for m in meta_rows
+                ],
+            )
+            raw_f = np.asarray(x_gp, dtype=np.float64)
+
         train_basis = (
             artifacts.x_train_pre_gp_scale
             if artifacts.x_train_pre_gp_scale is not None
@@ -389,7 +582,13 @@ class ProphetGPPipeline:
         for i, candidate in enumerate(raw_f):
             cand_unscaled_row = candidates_unscaled[i]
             cand_mol = cand_unscaled_row[: artifacts.mol_feature_dim]
-            if (
+            if meta_rows is not None:
+                meta = meta_rows[i]
+                nearest_input = meta["reactants_input"]
+                nearest_smiles = meta["reactants_smiles"]
+                nearest_distance = 0.0
+                cond_from_meta = meta.get("conditions", {})
+            elif (
                 artifacts.allowed_reactant_vectors is not None
                 and artifacts.allowed_reactant_inputs is not None
                 and artifacts.allowed_reactant_smiles is not None
@@ -398,11 +597,15 @@ class ProphetGPPipeline:
                 nearest_idx = int(np.argmin(distances))
                 nearest_input = artifacts.allowed_reactant_inputs[nearest_idx]
                 nearest_smiles = artifacts.allowed_reactant_smiles[nearest_idx]
+                nearest_distance = float(distances[nearest_idx])
+                cond_from_meta = None
             else:
                 distances = np.linalg.norm(train_mol - cand_mol, axis=1)
                 nearest_idx = int(np.argmin(distances))
                 nearest_input = artifacts.reactant_inputs[nearest_idx]
                 nearest_smiles = artifacts.reactant_smiles[nearest_idx]
+                nearest_distance = float(distances[nearest_idx])
+                cond_from_meta = None
             stats = self._target_prediction_stats(pred_mean[i], pred_var[i], artifacts)
             target_predictions = stats["predicted_target_mean"]
             target_uncertainty = stats["predicted_target_std"]
@@ -442,12 +645,14 @@ class ProphetGPPipeline:
                 "mapped_reactants_smiles": nearest_smiles,
                 "nearest_known_reactants_input": nearest_input,
                 "nearest_known_reactants_smiles": nearest_smiles,
-                "nearest_reactant_distance": float(distances[nearest_idx]),
+                "nearest_reactant_distance": nearest_distance,
             }
-            if self.config.data.reactant_allowed_values:
-                row["reactant_candidates_scope"] = self.config.data.reactant_allowed_values
+            if artifacts.reactant_scope:
+                row["reactant_candidates_scope"] = artifacts.reactant_scope
 
-            if artifacts.condition_columns:
+            if cond_from_meta is not None:
+                row.update(cond_from_meta)
+            elif artifacts.condition_columns:
                 cand_cond = cand_unscaled_row[artifacts.mol_feature_dim :].reshape(1, -1)
                 cond_values = self._inverse_condition_values(cand_cond, artifacts)
                 row.update(cond_values)

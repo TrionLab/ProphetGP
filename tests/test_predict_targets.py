@@ -18,6 +18,7 @@ def _minimal_artifacts() -> TrainingArtifacts:
         condition_types={"Temperature": "continuous"},
         condition_transformer=None,
         gp_input_scaler=None,
+        reactant_scope=["a", "b", "c"],
     )
 
 
