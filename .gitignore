@@ -46,6 +46,10 @@ htmlcov/
 
 # PubChem molecule resolution cache (populated at runtime)
 cache/
+tmp/
+
+# Tutorial / CLI merge outputs
+data/raw/
 nosetests.xml
 coverage.xml
 *.cover

@@ -1,0 +1,54 @@
+# emission_experiments.csv: topo_physchem + 반응물 허용 목록 예시
+data:
+  reactant_column: Mol.1
+  target_column:
+    - "Emission Peak"
+    - "FWHM"
+  reactant_delimiter: "|"
+  reactant_allowed_values:
+    - "1,5-Diaminonaphthalene"
+    - "1,8-Diaminonaphthalene"
+    - "2,3-Diaminonaphthalene"
+    - "2,6-Diaminonaphthalene"
+    - "1,2-Diaminonaphthalene"
+    - "1,3-Diaminonaphthalene"
+    - "1,4-Diaminonaphthalene"
+    - "1,6-Diaminonaphthalene"
+    - "1,7-Diaminonaphthalene"
+    - "2,7-Diaminonaphthalene"
+  condition_ranges:
+    Temperature:
+      min: 0
+      max: 600
+      grid_points: 7
+  ignore_columns:
+    - PLQY
+    - Pristine Emission
+    - Pristine FWHM
+    - Pristine PLQY
+  explicit_condition_types:
+    Temperature: continuous
+
+featurization:
+  featuriser: topo_physchem
+  combine_strategy: concat
+
+optimization:
+  objective: target  # 전역 기본 objective (target_objectives에 없는 타깃에만 적용)
+  suggestion_strategy: best_output
+  standardize_gp_inputs: true   # topo_physchem 등 고차원 입력에 필수에 가깝음 (BoTorch 수치 안정)
+  standardize_gp_targets: true  # 다중 타깃 GP 적합 안정화; predict는 원 스케일로 역변환
+  target_value: null  # 다중 타깃에서는 아래 target_objectives 개별 설정을 사용
+  target_objectives:
+    Emission Peak:
+      objective: target
+      target_value: 490.0
+      weight: 1.0
+    FWHM:
+      objective: minimize
+      weight: 1.0
+  n_restarts: 10
+  raw_samples: 128
+  target_search_size: 5000
+  condition_grid_points: 25
+  n_candidates: 3

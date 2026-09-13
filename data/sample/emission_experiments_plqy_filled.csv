@@ -1,0 +1,56 @@
+﻿Mol.1,Pristine Emission,Pristine FWHM,Pristine PLQY,Temperature,Emission Peak,FWHM,PLQY
+1-Aminonaphthalene,417,57,0.1,200,468,100,0.05
+2-Aminonaphthalene,415,52,0.1,200,460,89,0.05
+"1,5-Diaminonaphthalene",406,45,0.05,100,448,65,0.1
+"1,5-Diaminonaphthalene",406,45,0.05,200,506,75,0.1
+"1,8-Diaminonaphthalene",435,55,0.01,100,461,80,0.05
+"1,8-Diaminonaphthalene",435,55,0.01,200,573,119,0.05
+"2,3-Diaminonaphthalene",406,45,0.01,100,457,85,0.05
+"2,3-Diaminonaphthalene",406,45,0.01,200,522,110,0.05
+"2,6-Diaminonaphthalene",420,49,0.01,100,420,49,0.4
+"2,6-Diaminonaphthalene",420,49,0.01,200,488,58,0.4
+2-Aminoquinoline,400,50,,200,420,60,0.05
+3-Aminoquinoline,400,50,,200,540,150,0.05
+4-Aminoquinoline,400,50,,200,400,60,0.05
+5-Aminoquinoline,400,50,,200,540,110,0.05
+6-Aminoquinoline,410,,,200,520,80,0.56
+7-Aminoquinoline,400,50,,200,500,160,0.05
+8-Aminoquinoline,400,50,,200,540,120,0.05
+m-Phenylenediamine,,,,200,420,90,0.11
+p-Phenylenediamine,,,,200,630,130,0.06
+Resorcinol,,,,200,530,90,0.31
+o-Phenylenediamine,,,,200,560,110,0.53
+o-Aminophenol,,,,200,590,120,0.26
+"Perylene-3,9-dicarboxylic acid",,,,200,500,85,0.94
+"5-amino-1,10-phenanthroline|salicylic acid",,,,200,605,70,0.27
+9-anthracenecarboxylic acid,,,,200,560,80,0.05
+9-anthracenecarboxylic acid,,,,300,600,70,0.029
+9-anthracenecarboxylic acid,,,,400,615,80,0.05
+1-pyrenecarboxylic acid,,,,200,400,40,0.05
+1-pyrenecarboxylic acid,,,,300,510,100,0.05
+1-pyrenecarboxylic acid,,,,400,560,70,0.804
+Aniline,,,,180,406,75,0.25
+2-Naphthylamine,,,,180,445,70,0.11
+2-Anthracylamine,,,,180,510,85,0.28
+1-Aminopyrene,,,,180,440,90,0.14
+p-Phenylenediamine,,,,180,595,70,0.016
+"1,6-Naphthalenediol",,,,180,540,70,0.31
+"2,7-Naphthalenediol",,,,180,550,60,0.3
+"1,8-Diaminonaphthalene",,,,180,430,60,0.2
+"2,3-Diaminonaphthalene",,,,180,450,100,0.17
+"1,3-Dihydroxynaphthalene|2,3-Dichloro-5,6-dicyano-1,4-benzoquinone",,,,180,520,70,0.05
+Naphthalene-1-boronic acid|catechol,,,,180,406,70,0.394
+"1,8-Naphthalic anhydride|(R,R)-1,2-diaminocyclohexane",,,,180,450,140,0.05
+"1,8-Naphthalic anhydride|(S,S)-1,2-diaminocyclohexane",,,,180,450,135,0.05
+Anthracene,,,,80,580,130,0.44
+Pyrene-1-carbaldehyde,,,,150,535,130,0.13
+1-Aminoanthraquinone|phenolphthalein,,,,200,587,150,0.05
+"5-Amino-1,10-phenanthroline|terephthalic acid",,,,200,615,110,0.67
+Pyrene-1-carbaldehyde,,,,150,530,100,0.0668
+Naphthalenetetracarboxylic dianhydride|ethylenediamine,,,,200,508,115,0.055
+"3,4,9,10-Perylenetetracarboxylic dianhydride|urea",,,,160,745,70,0.033
+"3,4,9,10-Perylenetetracarboxylic dianhydride|L-lysine",,,,160,549,90,0.272
+"L-Cysteine|1,4-diaminoanthraquinone",,,,180,520,80,0.054
+"L-Cysteine|1,5-diamino-4,8-dihydroxyanthraquinone",,,,180,500,75,0.117
+L-Cysteine|anthraflavic acid,,,,180,450,110,0.128
+"1,3,6-Trinitropyrene|sodium sulfite",,,,200,490,100,0.49

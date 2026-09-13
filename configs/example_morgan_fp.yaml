@@ -1,4 +1,4 @@
-# sample_data.csv: Mol.1 + Temperature → Emission Peak 예시용
+# emission_experiments.csv: Mol.1 + Temperature → Emission Peak / FWHM (morgan_fp 예시)
 data:
   reactant_column: Mol.1
   target_column:
@@ -20,7 +20,6 @@ data:
     Temperature:
       min: 0
       max: 600
-      grid_points: 7
   ignore_columns:
     - PLQY
     - Pristine Emission
@@ -30,25 +29,24 @@ data:
     Temperature: continuous
 
 featurization:
-  featuriser: topo_physchem
+  featuriser: morgan_fp
   combine_strategy: concat
 
 optimization:
   objective: target  # 전역 기본 objective (target_objectives에 없는 타깃에만 적용)
   suggestion_strategy: best_output
-  standardize_gp_inputs: true   # topo_physchem 등 고차원 입력에 필수에 가깝음 (BoTorch 수치 안정)
-  standardize_gp_targets: true  # 다중 타깃 GP 적합 안정화; predict는 원 스케일로 역변환
+  standardize_gp_inputs: false  # true면 결합 특징을 학습 min-max로 [0,1]
+  standardize_gp_targets: false  # true면 Y 표준화 후 학습(BoTorch Y 경고 완화); predict·target_value는 원 스케일
   target_value: null  # 다중 타깃에서는 아래 target_objectives 개별 설정을 사용
   target_objectives:
     Emission Peak:
       objective: target
       target_value: 490.0
-      weight: 2.0
+      weight: 1.0
     FWHM:
       objective: minimize
-      weight: 1.0
+      weight: 0.8
   n_restarts: 10
   raw_samples: 128
   target_search_size: 5000
-  condition_grid_points: 25
   n_candidates: 3
